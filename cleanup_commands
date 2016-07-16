@@ -1,3 +1,170 @@
-# These will be the cleanup commands
-# first push trial
-# new line
+# All done on the malloy
+
+# Data in : /phylodata/mbalint/workdir/Stechlin_preexp/data
+# Workdir : /phylodata/mbalint/workdir/Stechlin_preexp
+
+# Quality check:
+# folder: 01_fastqc
+# parallel citation: Tange 2011
+ls ../data/*001.fastq | parallel -j 40 'fastqc'
+mv ../data/*.html .
+rm ../data/*.zip
+
+
+
+# Check the trimming length with the primers.
+# Trim to xxx bp:
+# 02_trimmed
+
+Reason:
+     12S index + primer + fragment + primer + index: 111 bp
+     16S index + primer + fragment + primer + index: 160 bp
+This makes the 12S fragments short enough for the assembly, and leaves enough length for the 16S fragments for assembly. 12S overlap ~ 95 bp, 16S overlap ~ 30 bp
+The input files (or links) must be in the working directory from where the parallel is executed
+../parallel -j 16 -r "fastx_trimmer -l 95 -o trimmed_*" ../data/*.fastq
+
+Original commands:
+fastx_trimmer -i ../2_combined/paired_1.fastq -l 95 -o paired_trimmed_1.fastq
+fastx_trimmer -i ../2_combined/paired_2.fastq -l 95 -o paired_trimmed_2.fastq
+
+Paired-end assembly:
+03_paired-end
+illuminapairedend --score-min=40 -r trimmed_BA_S5_L001_R2_001.fastq trimmed_BA_S5_L001_R1_001.fastq > paired_ BA_S5_L001 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S5_L002_R2_001.fastq trimmed_BA_S5_L002_R1_001.fastq > paired_ BA_S5_L002 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S5_L003_R2_001.fastq trimmed_BA_S5_L003_R1_001.fastq > paired_ BA_S5_L003 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S5_L004_R2_001.fastq trimmed_BA_S5_L004_R1_001.fastq > paired_ BA_S5_L004 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S8_L001_R2_001.fastq trimmed_BA_S8_L001_R1_001.fastq > paired_ BA_S8_L001 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S8_L002_R2_001.fastq trimmed_BA_S8_L002_R1_001.fastq > paired_ BA_S8_L002 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S8_L003_R2_001.fastq trimmed_BA_S8_L003_R1_001.fastq > paired_ BA_S8_L003 .fastq
+illuminapairedend --score-min=40 -r trimmed_BA_S8_L004_R2_001.fastq trimmed_BA_S8_L004_R1_001.fastq > paired_ BA_S8_L004 .fastq
+grep -c "@NS500764" *.fastq
+paired_BA_S5_L001.fastq : 439885
+paired_BA_S5_L002.fastq : 439426
+paired_BA_S5_L003.fastq : 450210
+paired_BA_S5_L004.fastq : 439389
+paired_BA_S8_L001.fastq : 2762476
+paired_BA_S8_L002.fastq : 2662385
+paired_BA_S8_L003.fastq : 2875451
+paired_BA_S8_L004.fastq : 2673051
+
+Remove unaligned :
+04_aligned
+combine reads
+cat ../03_paired_end/paired_BA_S*.fastq > combined_BA.fastq
+obigrep -p 'mode!="joined"' combined_BA.fastq > combined_ali.fastq
+grep -c "@NS500764" *.fastq
+combined_ali.fastq : 12540598
+
+Demultiplex :
+05_demux
+ngsfilter -t bol_frogs_ngsfilter.txt -u unidentified_samples.fastq combined_ali.fastq > grep -c "@NS500764" frogs_demuxed.fastq
+10298057
+16S reads:
+grep -c "experiment=16S" frogs_demuxed.fastq
+9479299
+
+Dereplicate into unique sequences :
+06_erep
+obiuniq -m sample frogs_demuxed.fastq > frogs_derep.fasta
+grep -c "^>" frogs_derep.fasta
+631003
+
+Denoise the dataset :
+07_denoise
+Get the counts of the 20 rarest sequences: 511117 sequences occur only once
+obistat -c count ../7_derep/bol_frogs_7_derep.fasta | sort -nk1 | head -20
+count     count     total
+1        511117    511117
+2         49412     98824
+3         18888     56664
+4         10130     40520
+5          6479     32395
+6          4515     27090
+7          3305     23135
+8          2472     19776
+9          1979     17811
+10         1646     16460
+11         1319     14509
+12         1163     13956
+13         1063     13819
+14          946     13244
+15          859     12885
+16          673     10768
+17          643     10931
+18          585     10530
+19          502      9538
+
+Keep only the sequence variants having a count greater or equal to 10:
+obigrep -p 'count>=10' frogs_derep.fasta > frogs_c10.fasta
+grep -c "^>" frogs_c10.fasta
+22706
+
+Clean the sequences :
+08_clean
+
+keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
+obiclean -s merged_sample -r 0.05 -H ../8_denoise/bol_frogs_8_denoise_c10.fasta > bol_frogs_9_clean.fasta
+grep -c "^>" frogs_clean.fasta
+14442
+
+ecoPCR databases :
+own 16S reference sequences + the ones from the GenBank:
+09_ecopcr/own/16S
+
+See the commands below for generating the ecopcr databases
+
+Assign so far not assigned sequences to EMBL :
+10_assign
+Own references
+ecotag -d 16S_bolivian_frogs.db -R 16S_fasta_nonredundant_noprimers.fasta --sort=count -m 0.98 -r frogs_clean.fasta > frogs_own16S_assigned.fasta
+
+# grep assigned
+obigrep -v -a 'scientific_name:root' frogs_own16S_sort.fasta > frogs_16S_own_assigned.fasta
+
+# grep not assigned
+obigrep -a 'scientific_name:root' frogs_own16S_sort.fasta > frogs_16S_not_assigned.fasta
+
+# counts
+
+frogs_16S_assigned.fasta:4805
+frogs_16S_not_assigned.fasta:9637
+
+# assignment against the GenBank database
+ecotag -d /phylodata/mbalint/databases/ecoPCR_embl_125/ecoPCR_embl_125 -R ../09_ecopcr/NCBI/16S/db_16S.fasta --sort=count -m 0.98 -r frogs_16S_not_assigned.fasta > frogs_16S_EMBL_assigned.fasta
+
+# counts
+grep -c "scientific_name=" *.fasta
+16S_fasta_nonredundant_noprimers.fasta:86
+frogs_16S_EMBL_assigned.fasta:9637
+frogs_16S_not_assigned.fasta:9637
+frogs_16S_own_assigned.fasta:4805
+frogs_clean.fasta:0
+frogs_own16S_annot.fasta:14442
+frogs_own16S_assigned.fasta:14442
+frogs_own16S_sort.fasta:14442
+
+grep -c "scientific_name=root" *.fasta
+16S_fasta_nonredundant_noprimers.fasta:0
+frogs_16S_EMBL_assigned.fasta:7807
+frogs_16S_not_assigned.fasta:9637
+frogs_16S_own_assigned.fasta:0
+frogs_clean.fasta:0
+frogs_own16S_annot.fasta:9637
+frogs_own16S_assigned.fasta:9637
+frogs_own16S_sort.fasta:9637
+
+11_abundance_tables
+# Remove non-informative annotations
+obiannotate  --delete-tag=scientific_name_by_db --delete-tag=obiclean_samplecount --delete-tag=obiclean_count --delete-tag=obiclean_singletoncount --delete-tag=obiclean_cluster --delete-tag=obiclean_internalcount --delete-tag=obiclean_head --delete-tag=taxid_by_db --delete-tag=obiclean_headcount --delete-tag=id_status --delete-tag=rank_by_db --delete-tag=order_name --delete-tag=order --delete_tag=sminR --delete_tag=sminL --delete_tag= frogs_16S_own_assigned.fasta > frogs_16S_own_annot.fasta
+
+obiannotate  --delete-tag=scientific_name_by_db --delete-tag=obiclean_samplecount --delete-tag=obiclean_count --delete-tag=obiclean_singletoncount --delete-tag=obiclean_cluster --delete-tag=obiclean_internalcount --delete-tag=obiclean_head --delete-tag=taxid_by_db --delete-tag=obiclean_headcount --delete-tag=id_status --delete-tag=rank_by_db --delete-tag=order_name --delete-tag=order frogs_16S_EMBL_assigned.fasta > frogs_16S_EMBL_annot.fasta
+
+# Sort them
+obisort -k count -r frogs_16S_own_annot.fasta > frogs_16S_own_sort.fasta
+
+obisort -k count -r frogs_16S_EMBL_annot.fasta > frogs_16S_EMBL_sort.fasta
+
+# create 16S assigned abundance matrix
+obitab -o --output-field-separator=, frogs_16S_own_sort.fasta > frogs_16S_own.tab
+
+obitab -o --output-field-separator=, frogs_16S_EMBL_sort.fasta > frogs_16S_EMBL.tab
