@@ -27,7 +27,7 @@
 
 # 2: Trimming
   #Check the trimming length with the primers.
-  #Primers (from Taberlet): i18S_V9_F, i18S_V9_R
+  #Primers (from Taberlet): i18S_V9_F (TCACAGACCTGTTATTGC ), i18S_V9_R (TYTGTCTGSTTRATTSCG)
   #Fragment length: most species ~110 bp, some ~150 bp + primers 2 x 20 bp
   #All reads trimmed to 100 bp: this should be shorter then the fragment length, and allows the assembly of the ~150 bp reads (fragment + primer)
 
@@ -96,6 +96,7 @@
     grep -c "^>" stechlin_derep.fasta
 
 # 6 Denoise the dataset
+
   #Get the counts of the 20 rarest sequences
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
@@ -114,18 +115,54 @@
     mkdir 07_clean
     cd 07_clean
 
+    **#remove the primers from the ends of the sequences**
+
   #keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
 
     obiclean -s merged_sample -r 0.05 -H ../06_denoise/stechlin_c10.fasta > stechlin_clean.fasta
     grep -c "^>" stechlin_clean.fasta
 
+# 8 ecoPCR databases
+
+  #**This needs to be changed: EMBL v128 is downloaded now, use that.**
+  #**Format new EMBL v128 ecoPCR database here. Check out Fred's script, or the pfficial ecoPCR site for mulitplexing possibilities**
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 08_ecopcr
+    cd 08_ecopcr
+
+  #First an ecoPCR database has to be generated with the i18S_V9_F, i18S_V9_R primers
+
+    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_125/ecoPCR_embl_125 -e 3 -l 60 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
+
+    RACCGTGCRAAGGTAG#C#R CCATRGGGTCYTCTCGT#C#T > 16S.ecopcr
+  grep -cv '#' */*.ecopcr
+  16S/16S.ecopcr:189360
+
+  Clean the databases
+
+  - filter sequences so that they have a good taxonomic description at the species, genus, and family levels
+
+  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=species --require-rank=genus --require-rank=family 12S.ecopcr > 12S_clean.fasta
+  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=species --require-rank=genus --require-rank=family 16S.ecopcr > 16S_clean.fasta
+
+  - remove redundant sequences (obiuniq command below).
+
+  obiuniq -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 12S_clean.fasta > 12S_clean_uniq.fasta
+  obiuniq -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 16S_clean.fasta > 16S_clean_uniq.fasta
+
+  - ensure that the dereplicated sequences have a taxid at the family level (obigrep command below).
+
+  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=family 12S_clean_uniq.fasta > 12S_clean_uniq_clean.fasta
+  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=family 16S_clean_uniq.fasta > 16S_clean_uniq_clean.fasta
+
+  - ensure that sequences each have a unique identification (obiannotate command below)
+
+  obiannotate --uniq-id 12S_clean_uniq_clean.fasta > db_12S.fasta
+  obiannotate --uniq-id 16S_clean_uniq_clean.fasta > db_16S.fasta
 
 
-ecoPCR databases :
-own 16S reference sequences + the ones from the GenBank:
-09_ecopcr/own/16S
 
-See the commands below for generating the ecopcr databases
 
 Assign so far not assigned sequences to EMBL :
 10_assign
