@@ -1,51 +1,58 @@
-# All done on the malloy
+# General details
+  #All done on the malloy
+  #Data in: /phylodata/mbalint/workdir/Stechlin_preexp/data
+  #Workdir: /phylodata/mbalint/workdir/Stechlin_preexp
 
-# Data in : /phylodata/mbalint/workdir/Stechlin_preexp/data
-# Workdir : /phylodata/mbalint/workdir/Stechlin_preexp
+# 1: Quality check:
+  #folder: 01_fastqc
+  #parallel citation: Tange 2011
 
-# Quality check:
-# folder: 01_fastqc
-# parallel citation: Tange 2011
-ls ../data/*001.fastq | parallel -j 40 'fastqc'
-mv ../data/*.html .
-rm ../data/*.zip
+    ls ../data/*001.fastq | parallel -j 40 'fastqc'
+
+    mv ../data/*.html .
+
+    rm ../data/*.zip
+
+# 2: Trimming
+  #Check the trimming length with the primers.
+  #Primers (from Taberlet): i18S_V9_F, i18S_V9_R
+  #Fragment length: most species ~110 bp, some ~150 bp + primers 2 x 20 bp
+  #All reads trimmed to 100 bp: this should be shorter then the fragment length, and allows the assembly of the ~150 bp reads (fragment + primer)
+
+    cd ../
+    mkdir 02_trimmed
+    cd 02_trimmed
+    ln -s ../data/*.fastq . # link because the parallel is simpler for me
+    ls *001.fastq | parallel -j 60 'fastx_trimmer -t 51 -i {} -o {.}_trimmed.fastq' # -t: remove 51 nucleotides from the ends
+    rm *001.fastq # remove the links. the -j 60 option of the parallel uses 60 processors
+
+# 3: Paired-end assembly:
+
+    cd ../
+    mkdir 03_paired-end
+    cd 03_paired-end
+
+  #link all files into present folder, because it is less complicated to use the parallel inputting for me
+
+    ln -s ../02_trimmed/*.fastq .
+
+    ls *.fastq | grep -v R2_001_trimmed.fastq | sed 's/R1_001_trimmed.fastq//' | parallel -j 60 'illuminapairedend --score-min=40  -r {.}R2_001_trimmed.fastq {.}R1_001_trimmed.fastq > {.}paired.fastq'
+
+  #1. list the filenames.
+  #2. keep the file name stems by removing the forward-reverse specific file information with 'sed'.
+  #3. give the filename stems to parallel as '{.}'.
+
+  #remove the links
+
+    rm *001.fastq
+
+  #Paired quality check
+
+    mkdir fastqc_paired # create a folder for the fastqc output
+    ls *_paired.fastq | parallel -j 60 'fastqc -o fastqc_paired {}'
+    rm fastqc_paired/*.zip # keep only the htmls
 
 
-
-# Check the trimming length with the primers.
-# Trim to xxx bp:
-# 02_trimmed
-
-Reason:
-     12S index + primer + fragment + primer + index: 111 bp
-     16S index + primer + fragment + primer + index: 160 bp
-This makes the 12S fragments short enough for the assembly, and leaves enough length for the 16S fragments for assembly. 12S overlap ~ 95 bp, 16S overlap ~ 30 bp
-The input files (or links) must be in the working directory from where the parallel is executed
-../parallel -j 16 -r "fastx_trimmer -l 95 -o trimmed_*" ../data/*.fastq
-
-Original commands:
-fastx_trimmer -i ../2_combined/paired_1.fastq -l 95 -o paired_trimmed_1.fastq
-fastx_trimmer -i ../2_combined/paired_2.fastq -l 95 -o paired_trimmed_2.fastq
-
-Paired-end assembly:
-03_paired-end
-illuminapairedend --score-min=40 -r trimmed_BA_S5_L001_R2_001.fastq trimmed_BA_S5_L001_R1_001.fastq > paired_ BA_S5_L001 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S5_L002_R2_001.fastq trimmed_BA_S5_L002_R1_001.fastq > paired_ BA_S5_L002 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S5_L003_R2_001.fastq trimmed_BA_S5_L003_R1_001.fastq > paired_ BA_S5_L003 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S5_L004_R2_001.fastq trimmed_BA_S5_L004_R1_001.fastq > paired_ BA_S5_L004 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S8_L001_R2_001.fastq trimmed_BA_S8_L001_R1_001.fastq > paired_ BA_S8_L001 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S8_L002_R2_001.fastq trimmed_BA_S8_L002_R1_001.fastq > paired_ BA_S8_L002 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S8_L003_R2_001.fastq trimmed_BA_S8_L003_R1_001.fastq > paired_ BA_S8_L003 .fastq
-illuminapairedend --score-min=40 -r trimmed_BA_S8_L004_R2_001.fastq trimmed_BA_S8_L004_R1_001.fastq > paired_ BA_S8_L004 .fastq
-grep -c "@NS500764" *.fastq
-paired_BA_S5_L001.fastq : 439885
-paired_BA_S5_L002.fastq : 439426
-paired_BA_S5_L003.fastq : 450210
-paired_BA_S5_L004.fastq : 439389
-paired_BA_S8_L001.fastq : 2762476
-paired_BA_S8_L002.fastq : 2662385
-paired_BA_S8_L003.fastq : 2875451
-paired_BA_S8_L004.fastq : 2673051
 
 Remove unaligned :
 04_aligned
