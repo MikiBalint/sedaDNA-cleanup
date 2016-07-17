@@ -44,7 +44,7 @@
 
   #remove the links
 
-    rm *001.fastq
+    rm *001_trimmed.fastq
 
   #Paired quality check
 
@@ -52,17 +52,34 @@
     ls *_paired.fastq | parallel -j 60 'fastqc -o fastqc_paired {}'
     rm fastqc_paired/*.zip # keep only the htmls
 
+# 4. Remove unaligned
+
+    cd ../
+    mkdir 04_unaligned
+    cd 04_unaligned
+  #the steps are different from the conventional OBITools pipeline from now on: the samples are already demultiplexed, but the sample names are not yet in the fastq header lines.
+
+  #The sample names should be inserted as 'sample=xxx; ' before the 'ali_length=xxx;'
+  #The rename.pl is a small script modified from **Bálint Ecol Evol**
+  #Original in /phylodata/mbalint/scripts
+
+    cp /phylodata/mbalint/scripts/rename.pl # copy the rename script
+    ln -s ../03_paired-end/*.fastq .
+    perl rename.pl
+    rm *paired.fastq
 
 
-Remove unaligned :
-04_aligned
-combine reads
-cat ../03_paired_end/paired_BA_S*.fastq > combined_BA.fastq
-obigrep -p 'mode!="joined"' combined_BA.fastq > combined_ali.fastq
-grep -c "@NS500764" *.fastq
-combined_ali.fastq : 12540598
+
+  #Now combine reads
+    cat ../03_paired-end/*paired.fastq > combined_stechlin.fastq
+    obigrep -p 'mode!="joined"' combined_stechlin > combined_ali.fastq
+    grep -c "@M01271" *.fastq
+
+
 
 Demultiplex :
+#**the primer sequences also need to be removed from the sequences.**
+
 05_demux
 ngsfilter -t bol_frogs_ngsfilter.txt -u unidentified_samples.fastq combined_ali.fastq > grep -c "@NS500764" frogs_demuxed.fastq
 10298057
