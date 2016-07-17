@@ -2,16 +2,28 @@
   #All done on the malloy
   #Data in: /phylodata/mbalint/workdir/Stechlin_preexp/data
   #Workdir: /phylodata/mbalint/workdir/Stechlin_preexp
+  #OBITools v1.2.7, downloaded 160717
+
+# 0: create a small dataset to check the script
+#parallel citation: Tange 2011
+
+    mkdir data
+    cd data
+    ln -s /phylodata/mbalint/datasets/160329_Stechlin-preexp/data/*.fastq .
+    mkdir complete_files
+    mv *.fastq complete_files/
+    cd complete_files
+    ls *.fastq | parallel -j 60 'head -n 400 {} > trial_{.}.fastq'
+    mv trial*.fastq ../
+    cd ../
 
 # 1: Quality check:
-  #folder: 01_fastqc
-  #parallel citation: Tange 2011
 
-    ls ../data/*001.fastq | parallel -j 40 'fastqc'
-
-    mv ../data/*.html .
-
-    rm ../data/*.zip
+    mkdir 01_fastqc
+    ls *.fastq | parallel -j 60 'fastqc -o 01_fastqc'
+    mv 01_fastqc /phylodata/mbalint/workdir/Stechlin_preexp
+    cd /phylodata/mbalint/workdir/Stechlin_preexp/01_fastqc
+    rm *.zip
 
 # 2: Trimming
   #Check the trimming length with the primers.
@@ -19,24 +31,24 @@
   #Fragment length: most species ~110 bp, some ~150 bp + primers 2 x 20 bp
   #All reads trimmed to 100 bp: this should be shorter then the fragment length, and allows the assembly of the ~150 bp reads (fragment + primer)
 
-    cd ../
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
     mkdir 02_trimmed
     cd 02_trimmed
-    ln -s ../data/*.fastq . # link because the parallel is simpler for me
-    ls *001.fastq | parallel -j 60 'fastx_trimmer -t 51 -i {} -o {.}_trimmed.fastq' # -t: remove 51 nucleotides from the ends
+    ln -s ../data/*.fastq . # link because the parallel input is simpler for me this way
+    ls *.fastq | parallel -j 60 'fastx_trimmer -t 51 -i {} -o {.}_trimmed.fastq' # -t: remove 51 nucleotides from the ends
     rm *001.fastq # remove the links. the -j 60 option of the parallel uses 60 processors
 
 # 3: Paired-end assembly:
 
-    cd ../
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
     mkdir 03_paired-end
     cd 03_paired-end
 
   #link all files into present folder, because it is less complicated to use the parallel inputting for me
 
-    ln -s ../02_trimmed/*.fastq .
+    ln -s ../02_trimmed/*trimmed.fastq .
 
-    ls *.fastq | grep -v R2_001_trimmed.fastq | sed 's/R1_001_trimmed.fastq//' | parallel -j 60 'illuminapairedend --score-min=40  -r {.}R2_001_trimmed.fastq {.}R1_001_trimmed.fastq > {.}paired.fastq'
+    ls *trimmed.fastq | grep -v R2_001_trimmed.fastq | sed 's/R1_001_trimmed.fastq//' | parallel -j 60 'illuminapairedend --score-min=40  -r {.}R2_001_trimmed.fastq {.}R1_001_trimmed.fastq > {.}paired.fastq'
 
   #1. list the filenames.
   #2. keep the file name stems by removing the forward-reverse specific file information with 'sed'.
@@ -54,82 +66,60 @@
 
 # 4. Remove unaligned
 
-    cd ../
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
     mkdir 04_unaligned
     cd 04_unaligned
+
   #the steps are different from the conventional OBITools pipeline from now on: the samples are already demultiplexed, but the sample names are not yet in the fastq header lines.
 
   #The sample names should be inserted as 'sample=xxx; ' before the 'ali_length=xxx;'
   #The rename.pl is a small script modified from **Bálint Ecol Evol**
   #Original in /phylodata/mbalint/scripts
 
-    cp /phylodata/mbalint/scripts/rename.pl # copy the rename script
+    cp /phylodata/mbalint/scripts/rename.pl . # copy the rename script
     ln -s ../03_paired-end/*.fastq .
     perl rename.pl
     rm *paired.fastq
 
+  #Now combine the files
+
+    cat *renamed.fastq > combined.fastq
+    obigrep -p 'mode!="joined"' combined.fastq > combined_ali.fastq
+    grep -c "@M01271" combined_ali.fastq
+
+# 5 De-replicate into unique sequences
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 05_derep
+    cd 05_derep
+    obiuniq -m sample ../04_unaligned/combined_ali.fastq > stechlin_derep.fasta
+    grep -c "^>" stechlin_derep.fasta
+
+# 6 Denoise the dataset
+  #Get the counts of the 20 rarest sequences
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 06_denoise
+    cd 06_denoise
+    obistat -c count ../05_derep/stechlin_derep.fasta | sort -nk1 | head -20 > rare_counts.txt
+
+#Keep only the sequence variants having a count greater or equal to 10:
+
+    obigrep -p 'count>=10' ../05_derep/stechlin_derep.fasta > stechlin_c10.fasta
+    grep -c "^>" stechlin_c10.fasta
+
+# 7 Clean the sequences
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 07_clean
+    cd 07_clean
+
+  #keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
+
+    obiclean -s merged_sample -r 0.05 -H ../06_denoise/stechlin_c10.fasta > stechlin_clean.fasta
+    grep -c "^>" stechlin_clean.fasta
 
 
-  #Now combine reads
-    cat ../03_paired-end/*paired.fastq > combined_stechlin.fastq
-    obigrep -p 'mode!="joined"' combined_stechlin > combined_ali.fastq
-    grep -c "@M01271" *.fastq
-
-
-
-Demultiplex :
-#**the primer sequences also need to be removed from the sequences.**
-
-05_demux
-ngsfilter -t bol_frogs_ngsfilter.txt -u unidentified_samples.fastq combined_ali.fastq > grep -c "@NS500764" frogs_demuxed.fastq
-10298057
-16S reads:
-grep -c "experiment=16S" frogs_demuxed.fastq
-9479299
-
-Dereplicate into unique sequences :
-06_erep
-obiuniq -m sample frogs_demuxed.fastq > frogs_derep.fasta
-grep -c "^>" frogs_derep.fasta
-631003
-
-Denoise the dataset :
-07_denoise
-Get the counts of the 20 rarest sequences: 511117 sequences occur only once
-obistat -c count ../7_derep/bol_frogs_7_derep.fasta | sort -nk1 | head -20
-count     count     total
-1        511117    511117
-2         49412     98824
-3         18888     56664
-4         10130     40520
-5          6479     32395
-6          4515     27090
-7          3305     23135
-8          2472     19776
-9          1979     17811
-10         1646     16460
-11         1319     14509
-12         1163     13956
-13         1063     13819
-14          946     13244
-15          859     12885
-16          673     10768
-17          643     10931
-18          585     10530
-19          502      9538
-
-Keep only the sequence variants having a count greater or equal to 10:
-obigrep -p 'count>=10' frogs_derep.fasta > frogs_c10.fasta
-grep -c "^>" frogs_c10.fasta
-22706
-
-Clean the sequences :
-08_clean
-
-keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
-obiclean -s merged_sample -r 0.05 -H ../8_denoise/bol_frogs_8_denoise_c10.fasta > bol_frogs_9_clean.fasta
-grep -c "^>" frogs_clean.fasta
-14442
 
 ecoPCR databases :
 own 16S reference sequences + the ones from the GenBank:
