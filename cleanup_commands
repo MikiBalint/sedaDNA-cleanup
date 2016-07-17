@@ -124,8 +124,29 @@
 
 # 8 ecoPCR databases
 
-  #**This needs to be changed: EMBL v128 is downloaded now, use that.**
-  #**Format new EMBL v128 ecoPCR database here. Check out Fred's script, or the pfficial ecoPCR site for mulitplexing possibilities**
+  ## Download and format the databases. These steps are commented out if the databases exist.
+  #Actual database EMBL v128, get it
+
+    cd /phylodata/mbalint/databases/
+    mkdir EMBL_128
+    cd EMBL_128
+    wget ftp://ftp.ebi.ac.uk/pub/databases/embl/release/std/rel_est*.*
+
+  #Get the actual GenBank taxonomy
+
+    cd /phylodata/mbalint/databases/
+    mkdir Taxonomy_160717
+    cd Taxonomy_160717
+    wget ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz
+    tar -zxvf taxdump.tar.gz
+
+  #Create the EMBL v128 ecoPCR database. Use '--skip-on-error' to get through some problematic EMBL entries.
+  #It may not be necessary to unpack 'gz' beforehand, try using '*.dat.gz'
+
+    cd /phylodata/mbalint/databases
+    mkdir ecoPCR_embl_128
+    cd ecoPCR_embl_128/
+    obiconvert --skip-on-error --embl -t ../Taxonomy_160717 --ecopcrdb-output=ecopcr_embl_128 ../EMBL_128/*.dat
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
     mkdir 08_ecopcr
@@ -133,7 +154,7 @@
 
   #First an ecoPCR database has to be generated with the i18S_V9_F, i18S_V9_R primers
 
-    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_125/ecoPCR_embl_125 -e 3 -l 60 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
+    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecoPCR_embl_128 -e 3 -l 60 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
 
     RACCGTGCRAAGGTAG#C#R CCATRGGGTCYTCTCGT#C#T > 16S.ecopcr
   grep -cv '#' */*.ecopcr
