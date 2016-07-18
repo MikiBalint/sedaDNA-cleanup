@@ -148,15 +148,14 @@
     cd ecoPCR_embl_128/
     obiconvert --skip-on-error --embl -t ../Taxonomy_160717 --ecopcrdb-output=ecopcr_embl_128 ../EMBL_128/*.dat
 
+  #Generate an ecoPCR assignment database with the i18S_V9_F, i18S_V9_R primers
+
     cd /phylodata/mbalint/workdir/Stechlin_preexp
     mkdir 08_ecopcr
     cd 08_ecopcr
+    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_128/ -e 3 -l 60 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
 
-  #First an ecoPCR database has to be generated with the i18S_V9_F, i18S_V9_R primers
 
-    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecoPCR_embl_128 -e 3 -l 60 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
-
-    RACCGTGCRAAGGTAG#C#R CCATRGGGTCYTCTCGT#C#T > 16S.ecopcr
   grep -cv '#' */*.ecopcr
   16S/16S.ecopcr:189360
 
