@@ -37,21 +37,11 @@ AssignmentInfo = data.frame(AssignmentInfo,
 # Abundance data: get all columns that have "sample" in column names
 AbundEmbl = EmblAssign[, grepl("sample", names(EmblAssign))]
 
-
-####
-
-
-
 # Sequnce variant abundances at least once head
-AbundHead = AbundEmbl[StatCounts$h_count > 0,]
+AbundHead = AbundEmbl[AssignmentInfo$h_count > 0,]
 
 
 
-
-
-# POPs and elements
-Meta = read.csv(file="../../../Data/Stechlin_pre-analysis/Stechlin_POP_elements.csv",
-                header=T, row.names = 1)
 
 
 # 160525 clean up negative controls: remove the maximum read number of a 
@@ -767,4 +757,7 @@ TotPresent = apply(LakeReads,2,function(vec) sum(vec>0))
 hist(TotPresent)
 
 
+# POPs and elements
+Meta = read.csv(file="../../../Data/Stechlin_pre-analysis/Stechlin_POP_elements.csv",
+                header=T, row.names = 1)
 
