@@ -21,8 +21,10 @@ EmblAssign = data.frame(EmblAssign,
                         s_count = rowSums(StatusEmbl == "s", na.rm=T), 
                         i_count = rowSums(StatusEmbl == "i", na.rm=T))
 
-# Keep only sequence variants that were seen as 'head' at least once
-EmblHead = EmblAssign[EmblAssign$h_count > 0,]
+# Keep only sequence variants that were seen at least once as 'head' or 
+# the 'singleton' count is higher than the 'intermediate' count
+EmblHead = EmblAssign[(EmblAssign$h_count) > 0 | 
+                        EmblAssign$s_count > EmblAssign$i_count,]
 
 # Clean up negative controls: remove the maximum read number of a 
 # sequence variant found in a negative control from every sample that 
@@ -38,89 +40,55 @@ PCRCont = grep("sample.PCR", names(EmblHead))
 MPXCont = grep("sample.MPX", names(EmblHead))
 
 # Write out negative control assignments for more analysis
-write.csv(file = "negative_control_identities.csv", 
-          cbind(name = EmblHead$scientific_name, EmblHead[,c(ExtCont, PCRCont, MPXCont)]))
+NegCont = cbind(name = EmblHead$scientific_name, 
+                EmblHead[,c(ExtCont, PCRCont, MPXCont)])
+
+# Aggregate according to taxon
+NegRegate = aggregate(. ~ name, NegCont, sum, na.action = na.exclude)
+rownames(NegRegate) = NegRegate$name
+NegRegate = NegRegate[,2:length(names(NegRegate))]
+
+# Remove taxa that were not seen in negatives
+NegRegate = NegRegate[apply(NegRegate,1,sum) > 0,]
+
+# Write for checking negatives
+write.csv(file = "negative_control_identities.csv", NegRegate)
+
+EmblHead[EmblHead$scientific_name == "Haloragaceae", c(ExtCont, PCRCont, MPXCont)]
+
+# Maximum number of reads in any control sample
+MaxControl = apply(EmblHead[,c(ExtCont,PCRCont,MPXCont)], 1, max)
+
+# Extract the highest read number of a sequence variant in a control 
+# from every sample
+EmblControlled = EmblHead
+
+# Extract the negative control maximums from the sample columns
+EmblControlled[,grep("sample", names(EmblHead))] <- 
+  sweep(EmblHead[,grep("sample", names(EmblHead))], 1, MaxControl, "-")
+
+# Set negative values to 0. Warnings are because the non-numeric cells
+EmblControlled[EmblControlled < 0] <- 0
+
+# Remove sequence variants with no reads left
+EmblControlled = EmblControlled[apply(EmblControlled[,grep("sample", names(EmblHead))],1,sum) > 0,]
+
+# Categories for sequence variants
+# Species abundance table from samples
+
+SamGregate = data.frame(name = EmblControlled$scientific_name,
+                        EmblControlled[,grep("sample.ST", names(EmblControlled))])
+SamCounts = aggregate(. ~ name, SamGregate, sum, na.action = na.exclude)
+rownames(SamCounts) = SamCounts$name
+SamCounts = SamCounts[,2:85]
+SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
+
+# Write our for checking in table
+write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
 
 # Eddig
 
-
-# Maximum number of reads in any control sample
-MaxControl = apply(AbundHead[,c(PNC,NTC,NC,MPX)], 1, max)
-
-# Extract the highest read number in a control from every sample
-# checks
-# AbundHead[1:5,100:102]
-# MaxControl[1:5]
-# sweep(AbundHead[1:5,100:102], 1, MaxControl[1:5], "-")
-AbundControlled = sweep(AbundHead, 1, MaxControl, "-")
-
-AbundControlled[AbundControlled < 0] <- 0
-
-summary(apply(AbundControlled,2,sum))
-summary(apply(AbundHead,1,sum))
-
-
-
-
-
-# Sequence assignment info
-AssignmentInfo = data.frame(best_id = EmblAssign$best_identity.db_i18S_V9_embl125,
-                            best_match = EmblAssign$best_match, 
-                      count = EmblAssign$count, 
-                      family = EmblAssign$family_name,
-                      genus = EmblAssign$genus_name, 
-                      rank = EmblAssign$rank,
-                      sci_name = EmblAssign$scientific_name, 
-                      taxid = EmblAssign$taxid, 
-                      sequence = EmblAssign$sequence,
-                      seq_names = rownames(EmblAssign),
-                      row.names=10)
-
-
-
-
-# Abundance data: get all columns that have "sample" in column names
-AbundEmbl = EmblAssign[, grepl("sample", names(EmblAssign))]
-
-
-
-
-
-
-
-
-
-# combine the replicates of samples
-# get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
-SampleNames = levels(as.factor(sapply(strsplit(names(AbundControlled), 
-                                               split='16S', fixed=TRUE), 
-                                      function(x) (x[1]))))
-
-# Sum the replicates for each sample
-SummedReps = data.frame(row.names = rownames(AbundControlled))
-for (i in 1:length(SampleNames)){
-  ActualSet = grep(SampleNames[i], names(AbundControlled)) # grep the columns of interest
-  SummedReps = cbind(SummedReps, apply(AbundControlled[ActualSet], 1, sum))
-}
-colnames(SummedReps) = SampleNames
-# write.csv(file="test.csv", AbundControlled)
-
-# In how many replicates observed per sample?
-PresentReps = data.frame(row.names = rownames(AbundControlled))
-for (i in 1:length(SampleNames)){
-  ActualSet = grep(SampleNames[i], names(AbundControlled))
-  Selected = AbundControlled[ActualSet]
-  Selected[Selected > 0] <- 1 # set the read numbers to 1
-  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
-}
-colnames(PresentReps) = SampleNames
-
-# Set read numbers to 0 in a sample if the sequence variant was not observed in at least
-# two PCR replicates
-SummedControlled = SummedReps
-SummedControlled[PresentReps < 2] <- 0
-
-# Categories for sequence variants: frogs, humans, other aquatic stuff, etc.
+# frogs, humans, other aquatic stuff, etc.
 # Amphi, HighGroup, "Homo sapiens", FarmAnim, Bird, Fish, Insect, Mammal
 Amphi = c("Dendropsophus leucophyllatus","Dendropsophus melanargyreus",
           "Dendropsophus minutus","Dendropsophus nanus","Dermatonotus muelleri",
@@ -183,6 +151,65 @@ sum(SummedControlled[MetaHead$sci_name == "Homo sapiens",])
 # Libellulidae: 
 sum(SummedControlled[MetaHead$sci_name %in% c("Micrathyria ocellata", "Libellulidae", 
                                               "Micrathyria", "Tramea"),])
+
+
+
+
+
+
+
+# Separate the assignment info and the abundances, so the sequence variants
+# can be aggregated according to species
+
+# Sequence assignment info
+# AssignmentInfo = data.frame(best_id = EmblControlled$best_identity.db_i18S_V9_embl125,
+#                             best_match = EmblControlled$best_match, 
+#                       count = EmblControlled$count, 
+#                       family = EmblControlled$family_name,
+#                       genus = EmblControlled$genus_name, 
+#                       rank = EmblControlled$rank,
+#                       sci_name = EmblControlled$scientific_name, 
+#                       taxid = EmblControlled$taxid, 
+#                       sequence = EmblControlled$sequence,
+#                       seq_names = rownames(EmblControlled),
+#                       row.names=10)
+# 
+# # Abundance data: get all columns that have "sample" in column names
+# AbundControlled = EmblControlled[, grepl("sample.ST", names(EmblControlled))]
+# 
+# # Controlled positive controls
+# PosControlled = EmblControlled[, grepl("sample.POS", names(EmblControlled))]
+
+
+# # combine the replicates of samples
+# # get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
+# SampleNames = levels(as.factor(sapply(strsplit(names(AbundControlled), 
+#                                                split='16S', fixed=TRUE), 
+#                                       function(x) (x[1]))))
+# 
+# # Sum the replicates for each sample
+# SummedReps = data.frame(row.names = rownames(AbundControlled))
+# for (i in 1:length(SampleNames)){
+#   ActualSet = grep(SampleNames[i], names(AbundControlled)) # grep the columns of interest
+#   SummedReps = cbind(SummedReps, apply(AbundControlled[ActualSet], 1, sum))
+# }
+# colnames(SummedReps) = SampleNames
+# # write.csv(file="test.csv", AbundControlled)
+# 
+# # In how many replicates observed per sample?
+# PresentReps = data.frame(row.names = rownames(AbundControlled))
+# for (i in 1:length(SampleNames)){
+#   ActualSet = grep(SampleNames[i], names(AbundControlled))
+#   Selected = AbundControlled[ActualSet]
+#   Selected[Selected > 0] <- 1 # set the read numbers to 1
+#   PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
+# }
+# colnames(PresentReps) = SampleNames
+# 
+# # Set read numbers to 0 in a sample if the sequence variant was not observed in at least
+# # two PCR replicates
+# SummedControlled = SummedReps
+# SummedControlled[PresentReps < 2] <- 0
 
 # Aggregate frog sequence variants according to the species 
 FrogAggregate = data.frame(name = MetaHead$sci_name[MetaHead$sci_name %in% Amphi], 
