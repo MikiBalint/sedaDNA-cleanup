@@ -12,59 +12,37 @@ library(mvabund)
 EmblAssign = read.csv(file="../../../Data/Stechlin_pre-analysis/stechlin_18S_V9_160727.tab",
                       header=T, sep='|', row.names = 1)
 
-# Sequence assignment info
-AssignmentInfo = data.frame(best_id = EmblAssign$best_identity.db_i18S_V9_embl125,
-                            best_match = EmblAssign$best_match, 
-                      count = EmblAssign$count, 
-                      family = EmblAssign$family_name,
-                      genus = EmblAssign$genus_name, 
-                      rank = EmblAssign$rank,
-                      sci_name = EmblAssign$scientific_name, 
-                      taxid = EmblAssign$taxid, 
-                      sequence = EmblAssign$sequence,
-                      seq_names = rownames(EmblAssign),
-                      row.names=10)
+# which columns have the status info for head, internal, singletons?
+StatusEmbl = EmblAssign[,grepl("obiclean.status", names(EmblAssign))]
 
-# Obiclean status files: get the column numbers that contain "obiclean.status"
-StatusEmbl = EmblAssign[, grepl("obiclean.status", names(EmblAssign))]
-
-# Combine the sequence status info with the AssignmentInfo
-AssignmentInfo = data.frame(AssignmentInfo,
+# summarize the status info for each seq. variant
+EmblAssign = data.frame(EmblAssign,
                         h_count = rowSums(StatusEmbl == "h", na.rm=T),
                         s_count = rowSums(StatusEmbl == "s", na.rm=T), 
                         i_count = rowSums(StatusEmbl == "i", na.rm=T))
 
-# Abundance data: get all columns that have "sample" in column names
-AbundEmbl = EmblAssign[, grepl("sample", names(EmblAssign))]
+# Keep only sequence variants that were seen as 'head' at least once
+EmblHead = EmblAssign[EmblAssign$h_count > 0,]
 
-# Sequnce variant abundances at least once head
-AbundHead = AbundEmbl[AssignmentInfo$h_count > 0,]
-
-
-
-
-
-# 160525 clean up negative controls: remove the maximum read number of a 
+# Clean up negative controls: remove the maximum read number of a 
 # sequence variant found in a negative control from every sample that 
 # contains that sequence variant
 
-# negative controls
+# Extraction controls
+ExtCont = grep("sample.EXT", names(EmblHead))
 
 # PCR controls
-PNC = grep("sample.P.NC", names(AbundHead))
-colnames(AbundHead)[PNC]
+PCRCont = grep("sample.PCR", names(EmblHead))
 
-# glass fiber filter extraction control
-NTC = grep("sample.NTC", names(AbundHead))
-colnames(AbundHead)[NTC]
+# Multiplexing controls
+MPXCont = grep("sample.MPX", names(EmblHead))
 
-# nylon filter extraction control
-NC = grep("sample.NC", names(AbundHead))
-colnames(AbundHead)[NC]
+# Write out negative control assignments for more analysis
+write.csv(file = "negative_control_identities.csv", 
+          cbind(name = EmblHead$scientific_name, EmblHead[,c(ExtCont, PCRCont, MPXCont)]))
 
-# multiplexing control
-MPX = grep("sample.MPX", names(AbundHead))
-colnames(AbundHead)[MPX]
+# Eddig
+
 
 # Maximum number of reads in any control sample
 MaxControl = apply(AbundHead[,c(PNC,NTC,NC,MPX)], 1, max)
@@ -80,6 +58,37 @@ AbundControlled[AbundControlled < 0] <- 0
 
 summary(apply(AbundControlled,2,sum))
 summary(apply(AbundHead,1,sum))
+
+
+
+
+
+# Sequence assignment info
+AssignmentInfo = data.frame(best_id = EmblAssign$best_identity.db_i18S_V9_embl125,
+                            best_match = EmblAssign$best_match, 
+                      count = EmblAssign$count, 
+                      family = EmblAssign$family_name,
+                      genus = EmblAssign$genus_name, 
+                      rank = EmblAssign$rank,
+                      sci_name = EmblAssign$scientific_name, 
+                      taxid = EmblAssign$taxid, 
+                      sequence = EmblAssign$sequence,
+                      seq_names = rownames(EmblAssign),
+                      row.names=10)
+
+
+
+
+# Abundance data: get all columns that have "sample" in column names
+AbundEmbl = EmblAssign[, grepl("sample", names(EmblAssign))]
+
+
+
+
+
+
+
+
 
 # combine the replicates of samples
 # get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
