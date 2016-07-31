@@ -4,13 +4,47 @@ library(vegan)
 library(knitr)
 library(boral)
 library(mvabund)
+library(corrplot)
 # library(geosphere)
 # library(car)
 # library(ape) # installed with ctv, infos here: http://www.phytools.org/eqg/Exercise_3.2/
 
-# Read all data
+# Read all abundance data
 EmblAssign = read.csv(file="../../../Data/Stechlin_pre-analysis/stechlin_18S_V9_160727.tab",
                       header=T, sep='|', row.names = 1)
+
+# Read POP and elements data
+POP_elem = read.csv(file = "../../../Data/Stechlin_pre-analysis/stechlin_pop_elements.csv", 
+                    header = T, row.names = 1)
+
+# Center the POP and element data to get z-scores
+PE_scaled = cbind(POP_elem[,1:2], 
+                  scale(POP_elem[,3:length(names(POP_elem))], 
+                        center = T, scale = T))
+
+# Show the graphs
+par(mfrow = c(2,1), mar = c(2,4,1,1))
+# POP
+plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
+                                 min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
+                          type = "n",
+     ylab = "Pesticides", xlab = "Depth (cm)", main = "")
+for (i in names(PE_scaled[3:14])){
+  points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
+}
+
+# Elements
+plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
+                             min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
+     type = "n",
+     ylab = "Elements", xlab = "Depth (cm)", main = "")
+for (i in names(PE_scaled[15:31])){
+  points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
+}
 
 # which columns have the status info for head, internal, singletons?
 StatusEmbl = EmblAssign[,grepl("obiclean.status", names(EmblAssign))]
@@ -86,7 +120,61 @@ SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
 # Write our for checking in table
 write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
 
+# Visualizations
+# depths corresponding the samples
+depths = read.csv(file="depths.csv", header=T)
+
+# Transposed species abundance matrix
+SamCountsT = t(SamCounts)
+
+# Z-scores of counts
+SamZ = scale(SamCountsT, center = T, scale = T)
+
+# Plot together with elements and POPs
+par(mfrow = c(3,1), mar = c(2,4,1,1))
+# POP
+plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
+                             min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
+     type = "n",
+     ylab = "Pesticides", xlab = "Depth (cm)", main = "")
+for (i in names(PE_scaled[3:14])){
+  points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
+}
+
+# Elements
+plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
+                          (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
+                             min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
+     type = "n",
+     ylab = "Elements", xlab = "Depth (cm)", main = "")
+for (i in names(PE_scaled[15:31])){
+  points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
+}
+
+# Taxa
+plot(PE_scaled$depth, seq(min(SamZ, na.rm=T), # keeping PE_scaled$depth: to use the same depth range
+                          max(SamZ, na.rm=T), 
+                          (max(SamZ, na.rm=T) - 
+                             min(SamZ, na.rm=T))/(nrow(PE_scaled)-1)), 
+     type = "n",
+     ylab = "Taxa", xlab = "Depth (cm)", main = "")
+for (i in names(as.data.frame(SamZ))) {
+  points(depths$depth, as.data.frame(SamZ)[,i], type = "p", col = sample(1:66), lwd=2)
+}
+
+corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
+         tl.cex = 0.5, tl.col = "black")
+
 # Eddig
+
+
+
+
+
+
 
 # frogs, humans, other aquatic stuff, etc.
 # Amphi, HighGroup, "Homo sapiens", FarmAnim, Bird, Fish, Insect, Mammal
