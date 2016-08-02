@@ -1,14 +1,17 @@
 library(vegan)
-# library(vegan3d)
-# library(bvenn)
 library(knitr)
 library(boral)
 library(mvabund)
 library(corrplot)
+library(leaps)
+library(car)
 # library(geosphere)
-# library(car)
 # library(ape) # installed with ctv, infos here: http://www.phytools.org/eqg/Exercise_3.2/
+# library(vegan3d)
+# library(bvenn)
 
+
+##### Read in all data
 # Read all abundance data
 EmblAssign = read.csv(file="../../../Data/Stechlin_pre-analysis/stechlin_18S_V9_160727.tab",
                       header=T, sep='|', row.names = 1)
@@ -17,19 +20,122 @@ EmblAssign = read.csv(file="../../../Data/Stechlin_pre-analysis/stechlin_18S_V9_
 POP_elem = read.csv(file = "../../../Data/Stechlin_pre-analysis/stechlin_pop_elements.csv", 
                     header = T, row.names = 1)
 
+# Read experimental setup data
+ExpSet = read.csv(file = "../../../Data/Stechlin_pre-analysis/sample_infos.csv",
+                  header = T, row.names = 1)
+
+##### Filter the DNA abundance data
+# which columns have the status info for head, internal, singletons?
+StatusEmbl = EmblAssign[,grepl("obiclean.status", names(EmblAssign))]
+
+# summarize the status info for each seq. variant
+EmblAssign = data.frame(EmblAssign,
+                        h_count = rowSums(StatusEmbl == "h", na.rm=T),
+                        s_count = rowSums(StatusEmbl == "s", na.rm=T), 
+                        i_count = rowSums(StatusEmbl == "i", na.rm=T))
+
+# Keep only sequence variants that were seen at least once as 'head' or 
+# the 'singleton' count is higher than the 'intermediate' count
+EmblHead = EmblAssign[(EmblAssign$h_count) > 0 | 
+                        EmblAssign$s_count > EmblAssign$i_count,]
+
+##### Methodology predictors of DNA data
+# The data for this includes samples, positive and negative controls.
+# Sequence variants are aggregated according to assigned scientific name.
+AllGregate = data.frame(name = EmblHead$scientific_name,
+                        EmblHead[,grep("sample", names(EmblHead))])
+AllCounts = aggregate(. ~ name, AllGregate, sum, na.action = na.exclude)
+rownames(AllCounts) = AllCounts$name
+
+# Remove the 'name' and 'undetermined' columns and transpose the date
+AllCountsT = AllCounts[,2:97]
+
+# The same for experimental predictors
+ExpPredictor = ExpSet[1:96,]
+
+# Check sample correspondence
+data.frame(names(AllCountsT), rownames(ExpPredictor))
+
+# Forward selection from here: http://www.statmethods.net/stats/regression.html
+
+# PCNM vectors of the plate coordinates
+PlatePCNM = pcnm(dist(ExpPredictor$column, ExpPredictor$row, method="euc"),
+                 threshold = 3)
+
+# PCNM visualizations
+ordisurf(ExpPredictor[,c(7,8)], scores(PlatePCNM, choi=1), 
+         bubble = 4, main = "PCNM 1")
+
+# Add the PCNM vectors to the experimental predictors
+ExpPredictor = data.frame(ExpPredictor, scores(PlatePCNM))
+
+## 1. DNA concentrations
+ConcModel <- regsubsets(conc ~ kit + person + extract_order + weight,
+                        data=ExpPredictor[5:96,], nbest=10)
+
+# Plot the model r2-s
+summary(ConcModel)
+plot(ConcModel,scale="r2")
+subsets(ConcModel, statistic="rsq")
+
+# Test the final model
+conc.lm1 = lm(conc ~ kit + person + extract_order + weight,
+              data=ExpPredictor[5:96,])
+
+conc.lm2 = lm(conc ~ kit + extract_order + person + weight,
+              data=ExpPredictor[5:96,])
+
+# ANOVA tables
+kable(anova(conc.lm1))
+kable(anova(conc.lm2))
+
+# Plots
+par(mar=c(4,4,1,1))
+
+# Personnel differences
+boxplot(conc ~ person, data=ExpPredictor[5:96,], 
+        ylab = "DNA concentrations (ng/ul)", col="grey", boxwex=.5, notch=T)
+
+# Kit differences
+boxplot(conc ~ kit, data=ExpPredictor[5:96,], 
+        ylab = "DNA concentrations (ng/ul)", col="grey", boxwex=.5, notch=T)
+
+# Extraction order differences
+plot(ExpPredictor[5:96,"weight"], ExpPredictor[5:96,"conc"], pch = 19,
+     xlab = "Sediment weight (mg)", ylab = "DNA concentration (ng/ul)")
+abline(lm(conc ~ weight, data = ExpPredictor[5:96,]), lwd = 2)
+
+plot(ExpPredictor[5:96,"extract_order"], ExpPredictor[5:96,"conc"], pch = 19,
+     xlab = "Extraction order (mg)", ylab = "DNA concentration (ng/ul)")
+abline(lm(conc ~ extract_order, data = ExpPredictor[5:96,]), lwd = 2)
+
+## 2. Taxon richness and diversity
+
+## 3. Community composition
+
+##### Pesticide, elements and eDNA visualizations
+# depths corresponding the samples
+depths = read.csv(file="depths.csv", header=T)
+
+# Transposed species abundance matrix
+SamCountsT = t(SamCounts)
+
+# Z-scores of counts
+SamZ = scale(SamCountsT, center = T, scale = T)
+
 # Center the POP and element data to get z-scores
 PE_scaled = cbind(POP_elem[,1:2], 
                   scale(POP_elem[,3:length(names(POP_elem))], 
                         center = T, scale = T))
 
-# Show the graphs
-par(mfrow = c(2,1), mar = c(2,4,1,1))
+# Plot together with elements and POPs
+par(mfrow = c(3,1), mar = c(2,4,1,1))
 # POP
 plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
                           max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
                           (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
-                                 min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
-                          type = "n",
+                             min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
+     type = "n",
      ylab = "Pesticides", xlab = "Depth (cm)", main = "")
 for (i in names(PE_scaled[3:14])){
   points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
@@ -46,19 +152,24 @@ for (i in names(PE_scaled[15:31])){
   points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
 }
 
-# which columns have the status info for head, internal, singletons?
-StatusEmbl = EmblAssign[,grepl("obiclean.status", names(EmblAssign))]
+# Taxa
+plot(PE_scaled$depth, seq(min(SamZ, na.rm=T), # keeping PE_scaled$depth: to use the same depth range
+                          max(SamZ, na.rm=T), 
+                          (max(SamZ, na.rm=T) - 
+                             min(SamZ, na.rm=T))/(nrow(PE_scaled)-1)), 
+     type = "n",
+     ylab = "Taxa", xlab = "Depth (cm)", main = "")
+for (i in names(as.data.frame(SamZ))) {
+  points(depths$depth, as.data.frame(SamZ)[,i], type = "p", col = sample(1:66), lwd=2)
+}
 
-# summarize the status info for each seq. variant
-EmblAssign = data.frame(EmblAssign,
-                        h_count = rowSums(StatusEmbl == "h", na.rm=T),
-                        s_count = rowSums(StatusEmbl == "s", na.rm=T), 
-                        i_count = rowSums(StatusEmbl == "i", na.rm=T))
+corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
+         tl.cex = 0.5, tl.col = "black")
 
-# Keep only sequence variants that were seen at least once as 'head' or 
-# the 'singleton' count is higher than the 'intermediate' count
-EmblHead = EmblAssign[(EmblAssign$h_count) > 0 | 
-                        EmblAssign$s_count > EmblAssign$i_count,]
+
+
+##### Analysis of community time series
+# Only credible reads in samples are used for ecological analyses. 
 
 # Clean up negative controls: remove the maximum read number of a 
 # sequence variant found in a negative control from every sample that 
@@ -118,58 +229,11 @@ SamCounts = SamCounts[,2:85]
 SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
 
 # Write our for checking in table
-write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
-
-# Visualizations
-# depths corresponding the samples
-depths = read.csv(file="depths.csv", header=T)
-
-# Transposed species abundance matrix
-SamCountsT = t(SamCounts)
-
-# Z-scores of counts
-SamZ = scale(SamCountsT, center = T, scale = T)
-
-# Plot together with elements and POPs
-par(mfrow = c(3,1), mar = c(2,4,1,1))
-# POP
-plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
-                          max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
-                          (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
-                             min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
-     type = "n",
-     ylab = "Pesticides", xlab = "Depth (cm)", main = "")
-for (i in names(PE_scaled[3:14])){
-  points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
-}
-
-# Elements
-plot(PE_scaled$depth, seq(min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
-                          max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T), 
-                          (max(PE_scaled[,3:ncol(PE_scaled)], na.rm=T) - 
-                             min(PE_scaled[,3:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
-     type = "n",
-     ylab = "Elements", xlab = "Depth (cm)", main = "")
-for (i in names(PE_scaled[15:31])){
-  points(PE_scaled$depth, PE_scaled[,i], type = "l", col = sample(1:58), lwd=2)
-}
-
-# Taxa
-plot(PE_scaled$depth, seq(min(SamZ, na.rm=T), # keeping PE_scaled$depth: to use the same depth range
-                          max(SamZ, na.rm=T), 
-                          (max(SamZ, na.rm=T) - 
-                             min(SamZ, na.rm=T))/(nrow(PE_scaled)-1)), 
-     type = "n",
-     ylab = "Taxa", xlab = "Depth (cm)", main = "")
-for (i in names(as.data.frame(SamZ))) {
-  points(depths$depth, as.data.frame(SamZ)[,i], type = "p", col = sample(1:66), lwd=2)
-}
-
-corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
-         tl.cex = 0.5, tl.col = "black")
-
-# Eddig
-
+# write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
+# write.csv(file = "stechlin_seq-variant_abund_matrix.csv", SamGregate)
+write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControlled),
+                                                     sci = EmblControlled$scientific_name,
+                                                     seq = EmblControlled$sequence))
 
 
 
