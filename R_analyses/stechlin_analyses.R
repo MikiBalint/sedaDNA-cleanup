@@ -39,44 +39,110 @@ EmblAssign = data.frame(EmblAssign,
 EmblHead = EmblAssign[(EmblAssign$h_count) > 0 | 
                         EmblAssign$s_count > EmblAssign$i_count,]
 
-##### Methodology predictors of DNA data
-# The data for this includes samples, positive and negative controls.
-# Sequence variants are aggregated according to assigned scientific name.
-AllGregate = data.frame(name = EmblHead$scientific_name,
-                        EmblHead[,grep("sample", names(EmblHead))])
-AllCounts = aggregate(. ~ name, AllGregate, sum, na.action = na.exclude)
-rownames(AllCounts) = AllCounts$name
+##### Clean up negative controls
+# Remove the maximum read number of a sequence variant 
+# found in a negative control from every sample that 
+# contains that variant
 
-# Remove the 'name' and 'undetermined' columns and transpose the date
-AllCountsT = AllCounts[,2:97]
+# Extraction controls
+ExtCont = grep("sample.EXT", names(EmblHead))
+
+# PCR controls
+PCRCont = grep("sample.PCR", names(EmblHead))
+
+# Multiplexing controls
+MPXCont = grep("sample.MPX", names(EmblHead))
+
+# Write out negative control assignments for more analysis
+NegCont = cbind(name = EmblHead$scientific_name, 
+                EmblHead[,c(ExtCont, PCRCont, MPXCont)])
+
+# Aggregate according to taxon
+NegRegate = aggregate(. ~ name, NegCont, sum, na.action = na.exclude)
+rownames(NegRegate) = NegRegate$name
+NegRegate = NegRegate[,2:length(names(NegRegate))]
+
+# Remove taxa that were not seen in negatives
+NegRegate = NegRegate[apply(NegRegate,1,sum) > 0,]
+
+# Write for checking negatives
+write.csv(file = "negative_control_identities.csv", NegRegate)
+
+# Maximum number of reads in any control sample
+MaxControl = apply(EmblHead[,c(ExtCont,PCRCont,MPXCont)], 1, max)
+
+# Extract the highest read number of a sequence variant in a control 
+# from every sample
+EmblControlled = EmblHead
+
+EmblControlled[,grep("sample", names(EmblHead))] <- 
+  sweep(EmblHead[,grep("sample", names(EmblHead))], 1, MaxControl, "-")
+
+# Set negative values to 0. Warnings are because the non-numeric cells
+EmblControlled[EmblControlled < 0] <- 0
+
+# Remove sequence variants with no reads left
+EmblControlled = EmblControlled[apply(EmblControlled[,grep("sample", names(EmblHead))],1,sum) > 0,]
+
+# Categories for sequence variants
+# Species abundance table from samples
+
+SamGregate = data.frame(name = EmblControlled$scientific_name,
+                        EmblControlled[,grep("sample.ST", names(EmblControlled))])
+SamCounts = aggregate(. ~ name, SamGregate, sum, na.action = na.exclude)
+rownames(SamCounts) = SamCounts$name
+SamCounts = SamCounts[,2:85]
+SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
+
+# Write our for checking in table
+# write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
+# write.csv(file = "stechlin_seq-variant_abund_matrix.csv", SamGregate)
+write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControlled),
+                                                     sci = EmblControlled$scientific_name,
+                                                     seq = EmblControlled$sequence))
+
+##### Methodology predictors of DNA data
+# The data for this includes only the samples, but not the controls,
+# as these have special diversiy and compositional contraints.
+
+# Transpose the abundance matrix
+SamCountsT = t(SamCounts)
 
 # The same for experimental predictors
-ExpPredictor = ExpSet[1:96,]
+ExpPredictor = ExpSet[grep("ST01", rownames(ExpSet)),]
 
 # Check sample correspondence
-data.frame(names(AllCountsT), rownames(ExpPredictor))
-
-# Forward selection from here: http://www.statmethods.net/stats/regression.html
+data.frame(rownames(SamCountsT), rownames(ExpPredictor))
 
 # PCNM vectors of the plate coordinates
 PlatePCNM = pcnm(dist(ExpPredictor$column, ExpPredictor$row, method="euc"),
                  threshold = 3)
 
 # PCNM visualizations
-ordisurf(ExpPredictor[,c(7,8)], scores(PlatePCNM, choi=1), 
-         bubble = 4, main = "PCNM 1")
+par(mfrow = c(2,4), mar = c(4,4,3,1))
+for (i in colnames(scores(PlatePCNM))){
+  ordisurf(ExpPredictor[,c(7,8)], scores(PlatePCNM, choi=i), 
+           bubble = 4, main = i)
+}
 
 # Add the PCNM vectors to the experimental predictors
 ExpPredictor = data.frame(ExpPredictor, scores(PlatePCNM))
 
+# Forward selection infos from here: http://www.statmethods.net/stats/regression.html
+
 ## 1. DNA concentrations
 ConcModel <- regsubsets(conc ~ kit + person + extract_order + weight,
-                        data=ExpPredictor[5:96,], nbest=10)
+                        data=ExpPredictor, nbest=10)
 
 # Plot the model r2-s
-summary(ConcModel)
+par(mfrow = c(1,2))
 plot(ConcModel,scale="r2")
 subsets(ConcModel, statistic="rsq")
+
+# R2 of best model
+ConcModel.summary = summary(ConcModel)
+max(ConcModel.summary$rsq)
+ConcModel.summary$outmat[ConcModel.summary$rsq == max(ConcModel.summary$rsq),]
 
 # Test the final model
 conc.lm1 = lm(conc ~ kit + person + extract_order + weight,
@@ -100,18 +166,121 @@ boxplot(conc ~ person, data=ExpPredictor[5:96,],
 boxplot(conc ~ kit, data=ExpPredictor[5:96,], 
         ylab = "DNA concentrations (ng/ul)", col="grey", boxwex=.5, notch=T)
 
-# Extraction order differences
-plot(ExpPredictor[5:96,"weight"], ExpPredictor[5:96,"conc"], pch = 19,
-     xlab = "Sediment weight (mg)", ylab = "DNA concentration (ng/ul)")
-abline(lm(conc ~ weight, data = ExpPredictor[5:96,]), lwd = 2)
+# Weight differences
+plot(effect("weight", conc.lm1, multiline=T))
 
-plot(ExpPredictor[5:96,"extract_order"], ExpPredictor[5:96,"conc"], pch = 19,
-     xlab = "Extraction order (mg)", ylab = "DNA concentration (ng/ul)")
-abline(lm(conc ~ extract_order, data = ExpPredictor[5:96,]), lwd = 2)
+# Extraction order differences
+plot(effect("extract_order", conc.lm1, multiline=T))
+
+# plot(ExpPredictor[,"weight"], ExpPredictor[,"conc"], pch = 19,
+#      xlab = "Sediment weight (mg)", ylab = "DNA concentration (ng/ul)")
+# 
+# abline(lm(conc ~ weight, data = ExpPredictor[5:96,]), lwd = 2)
+# 
+# plot(ExpPredictor[5:96,"extract_order"], ExpPredictor[5:96,"conc"], pch = 19,
+#      xlab = "Extraction order", ylab = "DNA concentration (ng/ul)")
+# abline(lm(conc ~ extract_order, data = ExpPredictor[5:96,]), lwd = 2)
 
 ## 2. Taxon richness and diversity
 
+# Calculate Hill's series
+CountsHill = renyi(SamCountsT, hill = T)
+
+# 2.1. Models of Hill's H0
+H0.Model <- regsubsets(CountsHill$`0` ~ reads + kit + person + extract_order + 
+                         pcr_order + weight + conc +
+                         PCNM1 + PCNM2 + PCNM3 + PCNM4 + 
+                         PCNM5 + PCNM6 + PCNM7,
+                       data=ExpPredictor, nbest=10)
+
+# Plot the model r2-s
+summary.H0Model = summary(H0.Model)
+plot(H0.Model,scale="r2")
+subsets(H0.Model, statistic="rsq")
+
+# Model with highest R2
+summary.H0Model$outmat[summary.H0Model$rsq == max(summary.H0Model$rsq),]
+
+# Similarly good models
+summary.H0Model$outmat[summary.H0Model$rsq > max(summary.H0Model$rsq) - 0.02,]
+
+H0.lm1 = lm(CountsHill$`0` ~ reads + person + extract_order + weight + 
+              PCNM1 + PCNM3 + PCNM6 + PCNM7, data=ExpPredictor)
+
+# H0 model statistics
+summary(H0.lm1)
+anova(H0.lm1)
+kable(anova(H0.lm1))
+
+# Plots of effects
+plot(effect("reads", H0.lm1, multiline=TRUE))
+plot(effect("weight", H0.lm1, multiline=TRUE))
+plot(effect("extract_order", H0.lm1, multiline=TRUE))
+
+# 2.2. Models of Hill's H1
+H1.Model <- regsubsets(CountsHill$`1` ~ reads + kit + person + extract_order + 
+                         pcr_order + weight + conc +
+                         PCNM1 + PCNM2 + PCNM3 + PCNM4 + 
+                         PCNM5 + PCNM6 + PCNM7,
+                       data=ExpPredictor, nbest=10)
+
+# Plot the model r2-s
+par(mfrow = c(1,2), mar = c(4,4,1,1))
+summary.H1Model = summary(H1.Model)
+plot(H1.Model,scale="r2")
+subsets(H1.Model, statistic="rsq")
+
+# Model with highest R2
+summary.H1Model$outmat[summary.H1Model$rsq == max(summary.H1Model$rsq),]
+
+H1.lm1 = lm(CountsHill$`1` ~ kit + person + extract_order + pcr_order + conc + 
+              PCNM2 + PCNM3 + PCNM4, data=ExpPredictor)
+
+# H2 model statistics
+summary(H1.lm1)
+anova(H1.lm1)
+kable(anova(H1.lm1))
+
+# Plots of effects
+plot(effect("pcr_order", H1.lm1, multiline=TRUE), ylab = "Hill's H1")
+
+# 2.3. Models of Hill's H2
+H2.Model <- regsubsets(CountsHill$`2` ~ reads + kit + person + extract_order + 
+                         pcr_order + weight + conc +
+                         PCNM1 + PCNM2 + PCNM3 + PCNM4 + 
+                         PCNM5 + PCNM6 + PCNM7,
+                       data=ExpPredictor, nbest=10)
+
+# Plot the model r2-s
+par(mfrow = c(1,2), mar = c(4,4,1,1))
+summary.H2Model = summary(H2.Model)
+plot(H2.Model,scale="r2")
+subsets(H2.Model, statistic="rsq")
+
+# Model with highest R2
+summary.H2Model$outmat[summary.H2Model$rsq == max(summary.H2Model$rsq),]
+
+H2.lm1 = lm(CountsHill$`2` ~ kit + person + extract_order + weight + conc + 
+              PCNM2 + PCNM3 + PCNM4, data=ExpPredictor)
+
+# H2 model statistics
+summary(H2.lm1)
+anova(H2.lm1)
+kable(anova(H2.lm1))
+
+# Plots of effects
+plot(effect("extract_order", H2.lm1, multiline=TRUE), ylab = "Hill's H2")
+
 ## 3. Community composition
+
+Samples.mvabund = mvabund(SamCountsT)
+
+# Bad idea: Just fit the full model
+methods.manyglm1 = manyglm(Samples.mvabund ~ reads + kit + person + extract_order + 
+                             pcr_order + weight + conc +
+                             PCNM1 + PCNM2 + PCNM3 + PCNM4 + 
+                             PCNM5 + PCNM6 + PCNM7, 
+                           data = ExpPredictor, family = "negative.binomial")
 
 ##### Pesticide, elements and eDNA visualizations
 # depths corresponding the samples
@@ -171,69 +340,6 @@ corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
 ##### Analysis of community time series
 # Only credible reads in samples are used for ecological analyses. 
 
-# Clean up negative controls: remove the maximum read number of a 
-# sequence variant found in a negative control from every sample that 
-# contains that sequence variant
-
-# Extraction controls
-ExtCont = grep("sample.EXT", names(EmblHead))
-
-# PCR controls
-PCRCont = grep("sample.PCR", names(EmblHead))
-
-# Multiplexing controls
-MPXCont = grep("sample.MPX", names(EmblHead))
-
-# Write out negative control assignments for more analysis
-NegCont = cbind(name = EmblHead$scientific_name, 
-                EmblHead[,c(ExtCont, PCRCont, MPXCont)])
-
-# Aggregate according to taxon
-NegRegate = aggregate(. ~ name, NegCont, sum, na.action = na.exclude)
-rownames(NegRegate) = NegRegate$name
-NegRegate = NegRegate[,2:length(names(NegRegate))]
-
-# Remove taxa that were not seen in negatives
-NegRegate = NegRegate[apply(NegRegate,1,sum) > 0,]
-
-# Write for checking negatives
-write.csv(file = "negative_control_identities.csv", NegRegate)
-
-EmblHead[EmblHead$scientific_name == "Haloragaceae", c(ExtCont, PCRCont, MPXCont)]
-
-# Maximum number of reads in any control sample
-MaxControl = apply(EmblHead[,c(ExtCont,PCRCont,MPXCont)], 1, max)
-
-# Extract the highest read number of a sequence variant in a control 
-# from every sample
-EmblControlled = EmblHead
-
-# Extract the negative control maximums from the sample columns
-EmblControlled[,grep("sample", names(EmblHead))] <- 
-  sweep(EmblHead[,grep("sample", names(EmblHead))], 1, MaxControl, "-")
-
-# Set negative values to 0. Warnings are because the non-numeric cells
-EmblControlled[EmblControlled < 0] <- 0
-
-# Remove sequence variants with no reads left
-EmblControlled = EmblControlled[apply(EmblControlled[,grep("sample", names(EmblHead))],1,sum) > 0,]
-
-# Categories for sequence variants
-# Species abundance table from samples
-
-SamGregate = data.frame(name = EmblControlled$scientific_name,
-                        EmblControlled[,grep("sample.ST", names(EmblControlled))])
-SamCounts = aggregate(. ~ name, SamGregate, sum, na.action = na.exclude)
-rownames(SamCounts) = SamCounts$name
-SamCounts = SamCounts[,2:85]
-SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
-
-# Write our for checking in table
-# write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
-# write.csv(file = "stechlin_seq-variant_abund_matrix.csv", SamGregate)
-write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControlled),
-                                                     sci = EmblControlled$scientific_name,
-                                                     seq = EmblControlled$sequence))
 
 
 
