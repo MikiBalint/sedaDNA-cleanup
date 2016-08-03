@@ -275,12 +275,124 @@ plot(effect("extract_order", H2.lm1, multiline=TRUE), ylab = "Hill's H2")
 
 Samples.mvabund = mvabund(SamCountsT)
 
-# Bad idea: Just fit the full model
-methods.manyglm1 = manyglm(Samples.mvabund ~ reads + kit + person + extract_order + 
-                             pcr_order + weight + conc +
-                             PCNM1 + PCNM2 + PCNM3 + PCNM4 + 
-                             PCNM5 + PCNM6 + PCNM7, 
+# Manual stepwise model selection. Predictor order established with
+# assumptions about potential laboratory error importance, or the
+# experiences from the previous tests. Predictors considered:
+# reads + kit + person + extract_order + pcr_order + weight + conc +
+# PCNM1 + PCNM2 + PCNM3 + PCNM4 + PCNM5 + PCNM6 + PCNM7
+
+# 3.1. Stepwise commmunity model selection
+methods.manyglm1 = manyglm(Samples.mvabund ~ reads, 
                            data = ExpPredictor, family = "negative.binomial")
+
+methods.manyglm2 = manyglm(Samples.mvabund ~ reads + kit, 
+                           data = ExpPredictor, family = "negative.binomial")
+
+methods.manyglm1$AICsum
+methods.manyglm2$AICsum
+
+methods.manyglm3 = manyglm(Samples.mvabund ~ reads + person, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm3$AICsum
+
+methods.manyglm4 = manyglm(Samples.mvabund ~ reads + person + extract_order, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm4$AICsum
+
+methods.manyglm5 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             pcr_order, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm5$AICsum
+
+methods.manyglm6 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             weight, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm6$AICsum
+
+methods.manyglm7 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             weight + conc, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm7$AICsum
+
+methods.manyglm8 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             weight + conc + PCNM1, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm8$AICsum
+
+methods.manyglm9 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             weight + conc + PCNM2, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm9$AICsum
+
+methods.manyglm10 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             weight + conc + PCNM3, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm10$AICsum
+
+methods.manyglm11 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                             weight + conc + PCNM4, 
+                           data = ExpPredictor, family = "negative.binomial")
+methods.manyglm11$AICsum
+
+methods.manyglm12 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                              weight + conc + PCNM5, 
+                            data = ExpPredictor, family = "negative.binomial")
+methods.manyglm12$AICsum
+
+methods.manyglm13 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                              weight + conc + PCNM6, 
+                            data = ExpPredictor, family = "negative.binomial")
+methods.manyglm13$AICsum
+
+methods.manyglm14 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+                              weight + conc + PCNM7, 
+                            data = ExpPredictor, family = "negative.binomial")
+methods.manyglm14$AICsum
+
+# The best model is 
+methods.manyglm7$call
+methods.manyglm7$AICsum
+plot(methods.manyglm7, which=c(1:4))
+
+# 3.2. Model test
+community.anova = anova(methods.manyglm7, nBoot = 100, p.uni = "adjusted")
+kable(community.anova$table)
+community.summary = summary(methods.manyglm7, nBoot = 100, test = "LR")
+kable(community.summary$coefficients)
+
+# model-based ordination
+# Summary of overdispersion parameters
+summary(methods.manyglm7$theta)
+hist(methods.manyglm7$theta)
+
+# Set overdispersion prior
+set.prior = list(type = c("normal","normal","normal","uniform"),
+                 hypparams = c(100, 20, 100, 10))
+
+# LV ordination done on species with relatively low overdispersion
+comm.ord = boral(SamCountsT[,methods.manyglm7$theta > 10],
+                 family = "negative.binomial", 
+                 prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+                 n.iteration = 100, n.thin = 1)
+
+# Plot the ordinations
+par(mfrow = c(2,2), mar = c(2,2,2,1))
+predictors = c("reads", "extract_order", "weight", "conc")
+for (i in predictors) {
+  ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
+                      display = "sites", xlim = c(-0.3,0.3))
+  points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
+  ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
+}
+
+# ordiellipse(ordi.comm, ExpPredictor$person,cex=.5, 
+#             draw="polygon", col="orange",
+#             alpha=200,kind="se",conf=0.95, 
+#             show.groups=(c("Miki")))
+# ordiellipse(ordi.comm, ExpPredictor$person,cex=.5, 
+#             draw="polygon", col="purple",
+#             alpha=200,kind="se",conf=0.95, 
+#             show.groups=(c("Orsi")))
 
 ##### Pesticide, elements and eDNA visualizations
 # depths corresponding the samples
