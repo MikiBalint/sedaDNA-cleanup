@@ -10,8 +10,6 @@ library(car)
 # library(vegan3d)
 # library(bvenn)
 
-# trial lines
-
 ##### Read in all data
 # Read all abundance data
 EmblAssign = read.csv(file="../../../Data/Stechlin_pre-analysis/stechlin_18S_V9_160727.tab",
