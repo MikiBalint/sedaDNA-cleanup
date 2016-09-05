@@ -1,5 +1,3 @@
-# Trial lines some more
-
 # General details
   #All done on the malloy
   #Data in: /phylodata/mbalint/workdir/Stechlin_preexp/data
@@ -29,7 +27,7 @@
 
 # 2: Trimming
   #Check the trimming length with the primers.
-  #Primers (from Taberlet): i18S_V9_F (TCACAGACCTGTTATTGC ), i18S_V9_R (TYTGTCTGSTTRATTSCG)
+  #Primers (from Taberlet): i18S_V9_F (TCACAGACCTGTTATTGC 18bp), i18S_V9_R (TYTGTCTGSTTRATTSCG 18bp)
   #Fragment length: most species ~110 bp, some ~150 bp + primers 2 x 20 bp
   #All reads trimmed to 100 bp: this should be shorter then the fragment length, and allows the assembly of the ~150 bp reads (fragment + primer)
 
@@ -65,6 +63,14 @@
     mkdir fastqc_paired # create a folder for the fastqc output
     ls *_paired.fastq | parallel -j 60 'fastqc -o fastqc_paired {}'
     rm fastqc_paired/*.zip # keep only the htmls
+
+  #Remove primers from the read ends
+  #Primers are 18 bp
+  #Trim the reverse primers from the read ends
+  obicut
+
+
+  ls *.fastq | parallel -j 60 'fastx_trimmer -t 18 -i {} -o {.}_norev.fastq'
 
 # 4. Remove unaligned
 
