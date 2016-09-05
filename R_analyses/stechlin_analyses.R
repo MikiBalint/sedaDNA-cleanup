@@ -10,7 +10,7 @@ library(car)
 # library(vegan3d)
 # library(bvenn)
 
-# trial line
+# trial lines
 
 ##### Read in all data
 # Read all abundance data
