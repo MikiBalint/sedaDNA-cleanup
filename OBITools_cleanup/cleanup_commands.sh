@@ -66,11 +66,11 @@
 
   #Remove primers from the read ends
   #Primers are 18 bp
-  #Trim the reverse primers from the read ends
-  obicut
+  #Insert the sequence length (seq_length) into the headers
+  ls *.fastq | parallel -j 60 'obiannotate --length --fasta-output {} > {.}_wlength.fasta'
 
-
-  ls *.fastq | parallel -j 60 'fastx_trimmer -t 18 -i {} -o {.}_norev.fastq'
+  #Trim the reverse primers from the read ends. Reverse primer bases calculated with the seq_length
+  ls *.fasta | parallel -j 60 'obicut -b 19 -e seq_length-18 --uppercase {} > {.}_noprimer.fasta'
 
 # 4. Remove unaligned
 
@@ -84,15 +84,18 @@
   #The rename.pl is a small script modified from **Bálint Ecol Evol**
   #Original in /phylodata/mbalint/scripts
 
-    cp /phylodata/mbalint/scripts/rename.pl . # copy the rename script
-    ln -s ../03_paired-end/*.fastq .
-    perl rename.pl
-    rm *paired.fastq
+    cp /phylodata/mbalint/scripts/rename_fasta.pl . # copy the rename script
+    ln -s ../03_paired-end/*_noprimer.fasta .
+    perl rename_fasta.pl
+    rm *noprimer.fasta
 
   #Now combine the files
 
-    cat *renamed.fastq > combined.fastq
-    obigrep -p 'mode!="joined"' combined.fastq > combined_ali.fastq
+    cat *renamed.fasta > combined.fasta
+    obigrep -p 'mode!="joined"' combined.fasta > combined_ali.fasta
+
+###Eddig
+
     grep -c "@M01271" combined_ali.fastq
 
 # 5 De-replicate into unique sequences
