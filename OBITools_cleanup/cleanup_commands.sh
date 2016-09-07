@@ -89,22 +89,44 @@
     perl rename_fasta.pl
     rm *noprimer.fasta
 
+AATGATACGGCGACCACCGAGATCTACACAAGTCGGATCGTCGGCAGCGTC
+CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
   #Now combine the files
 
     cat *renamed.fasta > combined.fasta
     obigrep -p 'mode!="joined"' combined.fasta > combined_ali.fasta
 
-###Eddig
+  #Successfully assembled sequences
+    grep -c "^>" combined_ali.fasta
 
-    grep -c "@M01271" combined_ali.fastq
+  #Remove sequences shorter, that 50 bp
+    obigrep -l 50 combined_ali.fasta > combined_noshort.fasta
+
+    grep -c "^>" combined_noshort.fasta
+
+# 5 chimera checking
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 05_chimera
+    cd 05_chimera
+    ln -s ../04_unaligned/combined_noshort.fasta .
+
+#vsearch for chimera checking
+##Documentation here:
+##https://wiki.gacrc.uga.edu/wiki/Vsearch#Documentation
+
+  vsearch --threads 60 --uchime_denovo combined_noshort.fasta --uchimeout chimera_results.tab --nonchimeras stechlin_nonchimera.fasta --chimeras stechlin_chimera.fasta
 
 # 5 De-replicate into unique sequences
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
     mkdir 05_derep
     cd 05_derep
-    obiuniq -m sample ../04_unaligned/combined_ali.fastq > stechlin_derep.fasta
+    obiuniq -m sample ../04_unaligned/combined_ali.fasta > stechlin_derep.fasta
     grep -c "^>" stechlin_derep.fasta
+
+
+
+
 
 # 6 Denoise the dataset
 
@@ -126,8 +148,6 @@
     mkdir 07_clean
     cd 07_clean
 
-    **#remove the primers from the ends of the sequences**
-
   #keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
 
     obiclean -s merged_sample -r 0.05 -H ../06_denoise/stechlin_c10.fasta > stechlin_clean.fasta
@@ -141,7 +161,7 @@
     cd /phylodata/mbalint/databases/
     mkdir EMBL_128
     cd EMBL_128
-    wget ftp://ftp.ebi.ac.uk/pub/databases/embl/release/std/rel_est*.*
+    wget ftp://ftp.ebi.ac.uk/pub/databases/embl/release/std/rel_std*.*
 
   #Get the actual GenBank taxonomy
 
