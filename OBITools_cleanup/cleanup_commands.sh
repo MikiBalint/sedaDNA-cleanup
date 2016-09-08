@@ -116,44 +116,41 @@ CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
 
   vsearch --threads 60 --uchime_denovo combined_noshort.fasta --uchimeout chimera_results.tab --nonchimeras stechlin_nonchimera.fasta --chimeras stechlin_chimera.fasta
 
-# 5 De-replicate into unique sequences
+# 6 De-replicate into unique sequences
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
-    mkdir 05_derep
-    cd 05_derep
-    obiuniq -m sample ../04_unaligned/combined_ali.fasta > stechlin_derep.fasta
+    mkdir 06_derep
+    cd 06_derep
+  #Since all were non-chimeric and the VSEARCH chimera checking screws the header, let's use the chimieracheck input file
+    obiuniq -m sample ../05_chimera/combined_noshort.fasta > stechlin_derep.fasta
     grep -c "^>" stechlin_derep.fasta
 
-
-
-
-
-# 6 Denoise the dataset
+# 7 Denoise the dataset
 
   #Get the counts of the 20 rarest sequences
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
-    mkdir 06_denoise
-    cd 06_denoise
-    obistat -c count ../05_derep/stechlin_derep.fasta | sort -nk1 | head -20 > rare_counts.txt
+    mkdir 07_denoise
+    cd 07_denoise
+    obistat -c count ../06_derep/stechlin_derep.fasta | sort -nk1 | head -20 > rare_counts.txt
 
 #Keep only the sequence variants having a count greater or equal to 10:
 
-    obigrep -p 'count>=10' ../05_derep/stechlin_derep.fasta > stechlin_c10.fasta
+    obigrep -p 'count>=10' ../06_derep/stechlin_derep.fasta > stechlin_c10.fasta
     grep -c "^>" stechlin_c10.fasta
 
-# 7 Clean the sequences
+# 8 Clean the sequences
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
-    mkdir 07_clean
-    cd 07_clean
+    mkdir 08_clean
+    cd 08_clean
 
   #keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
 
-    obiclean -s merged_sample -r 0.05 -H ../06_denoise/stechlin_c10.fasta > stechlin_clean.fasta
+    obiclean -s merged_sample -r 0.05 -H ../07_denoise/stechlin_c10.fasta > stechlin_clean.fasta
     grep -c "^>" stechlin_clean.fasta
 
-# 8 ecoPCR databases
+# 9 ecoPCR databases
 
   ## Download and format the databases. These steps are commented out if the databases exist.
   #Actual database EMBL v128, get it
@@ -166,8 +163,8 @@ CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
   #Get the actual GenBank taxonomy
 
     cd /phylodata/mbalint/databases/
-    mkdir Taxonomy_160717
-    cd Taxonomy_160717
+    mkdir Taxonomy_160908
+    cd Taxonomy_160908
     wget ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz
     tar -zxvf taxdump.tar.gz
 
@@ -177,7 +174,9 @@ CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
     cd /phylodata/mbalint/databases
     mkdir ecoPCR_embl_128
     cd ecoPCR_embl_128/
-    obiconvert --skip-on-error --embl -t ../Taxonomy_160717 --ecopcrdb-output=ecopcr_embl_128 ../EMBL_128/*.dat
+    obiconvert --skip-on-error --embl -t ../Taxonomy_160908 --ecopcrdb-output=ecopcr_embl_128 ../EMBL_128/*.dat.gz
+
+  #Eddig
 
   #Generate an ecoPCR assignment database with the i18S_V9_F, i18S_V9_R primers
 
