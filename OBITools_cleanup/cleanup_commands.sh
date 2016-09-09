@@ -176,83 +176,37 @@ CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
     cd ecoPCR_embl_128/
     obiconvert --skip-on-error --embl -t ../Taxonomy_160908 --ecopcrdb-output=ecopcr_embl_128 ../EMBL_128/*.dat.gz
 
-  #Eddig
-
   #Generate an ecoPCR assignment database with the i18S_V9_F, i18S_V9_R primers
 
     cd /phylodata/mbalint/workdir/Stechlin_preexp
-    mkdir 08_ecopcr
-    cd 08_ecopcr
-    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_128/ -e 3 -l 60 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
+    mkdir 09_ecopcr
+    cd 09_ecopcr
+    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 -e 3 -l 50 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
 
+    grep -cv '#' *.ecoPCR
 
-  grep -cv '#' */*.ecopcr
-  16S/16S.ecopcr:189360
+  #Clean the databases
 
-  Clean the databases
+  #- filter sequences so that they have a good taxonomic description at the species, genus, and family levels
+  obigrep -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 --require-rank=species --require-rank=genus --require-rank=family i18S_V9.ecoPCR > i18S_V9_clean.fasta
 
-  - filter sequences so that they have a good taxonomic description at the species, genus, and family levels
+  #remove redundant sequences (obiuniq command below).
+  obiuniq -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 i18S_V9_clean.fasta > i18S_V9_clean_uniq.fasta
 
-  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=species --require-rank=genus --require-rank=family 12S.ecopcr > 12S_clean.fasta
-  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=species --require-rank=genus --require-rank=family 16S.ecopcr > 16S_clean.fasta
+  #- ensure that the dereplicated sequences have a taxid at the family level (obigrep command below).
+  obigrep -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 --require-rank=family i18S_V9_clean_uniq.fasta > i18S_V9_clean_uniq_clean.fasta
 
-  - remove redundant sequences (obiuniq command below).
+  #- ensure that sequences each have a unique identification (obiannotate command below)
+  obiannotate --uniq-id i18S_V9_clean_uniq_clean.fasta > db_i18S_v9.fasta
 
-  obiuniq -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 12S_clean.fasta > 12S_clean_uniq.fasta
-  obiuniq -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 16S_clean.fasta > 16S_clean_uniq.fasta
+# 10 Taxonomic assignment
 
-  - ensure that the dereplicated sequences have a taxid at the family level (obigrep command below).
+  cd /phylodata/mbalint/workdir/Stechlin_preexp
+  mkdir 10_assign
+  cd 10_assign
+  ecotag -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 -R ../09_ecopcr/db_i18S_v9.fasta --sort=count -m 0.98 -r ../08_clean/stechlin_clean.fasta > stechlin_assigned.fasta
 
-  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=family 12S_clean_uniq.fasta > 12S_clean_uniq_clean.fasta
-  obigrep -d ../../../../../databases/ecoPCR_embl_125/ecoPCR_embl_125 --require-rank=family 16S_clean_uniq.fasta > 16S_clean_uniq_clean.fasta
-
-  - ensure that sequences each have a unique identification (obiannotate command below)
-
-  obiannotate --uniq-id 12S_clean_uniq_clean.fasta > db_12S.fasta
-  obiannotate --uniq-id 16S_clean_uniq_clean.fasta > db_16S.fasta
-
-
-
-
-Assign so far not assigned sequences to EMBL :
-10_assign
-Own references
-ecotag -d 16S_bolivian_frogs.db -R 16S_fasta_nonredundant_noprimers.fasta --sort=count -m 0.98 -r frogs_clean.fasta > frogs_own16S_assigned.fasta
-
-# grep assigned
-obigrep -v -a 'scientific_name:root' frogs_own16S_sort.fasta > frogs_16S_own_assigned.fasta
-
-# grep not assigned
-obigrep -a 'scientific_name:root' frogs_own16S_sort.fasta > frogs_16S_not_assigned.fasta
-
-# counts
-
-frogs_16S_assigned.fasta:4805
-frogs_16S_not_assigned.fasta:9637
-
-# assignment against the GenBank database
-ecotag -d /phylodata/mbalint/databases/ecoPCR_embl_125/ecoPCR_embl_125 -R ../09_ecopcr/NCBI/16S/db_16S.fasta --sort=count -m 0.98 -r frogs_16S_not_assigned.fasta > frogs_16S_EMBL_assigned.fasta
-
-# counts
-grep -c "scientific_name=" *.fasta
-16S_fasta_nonredundant_noprimers.fasta:86
-frogs_16S_EMBL_assigned.fasta:9637
-frogs_16S_not_assigned.fasta:9637
-frogs_16S_own_assigned.fasta:4805
-frogs_clean.fasta:0
-frogs_own16S_annot.fasta:14442
-frogs_own16S_assigned.fasta:14442
-frogs_own16S_sort.fasta:14442
-
-grep -c "scientific_name=root" *.fasta
-16S_fasta_nonredundant_noprimers.fasta:0
-frogs_16S_EMBL_assigned.fasta:7807
-frogs_16S_not_assigned.fasta:9637
-frogs_16S_own_assigned.fasta:0
-frogs_clean.fasta:0
-frogs_own16S_annot.fasta:9637
-frogs_own16S_assigned.fasta:9637
-frogs_own16S_sort.fasta:9637
+# Eddig
 
 11_abundance_tables
 # Remove non-informative annotations
