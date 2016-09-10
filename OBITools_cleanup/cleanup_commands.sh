@@ -206,20 +206,14 @@ CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
   cd 10_assign
   ecotag -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 -R ../09_ecopcr/db_i18S_v9.fasta --sort=count -m 0.98 -r ../08_clean/stechlin_clean.fasta > stechlin_assigned.fasta
 
-# Eddig
+  grep -c ">" stechlin_assigned.fasta
 
-11_abundance_tables
-# Remove non-informative annotations
-obiannotate  --delete-tag=scientific_name_by_db --delete-tag=obiclean_samplecount --delete-tag=obiclean_count --delete-tag=obiclean_singletoncount --delete-tag=obiclean_cluster --delete-tag=obiclean_internalcount --delete-tag=obiclean_head --delete-tag=taxid_by_db --delete-tag=obiclean_headcount --delete-tag=id_status --delete-tag=rank_by_db --delete-tag=order_name --delete-tag=order --delete_tag=sminR --delete_tag=sminL --delete_tag= frogs_16S_own_assigned.fasta > frogs_16S_own_annot.fasta
+# 11_abundance_tables
 
-obiannotate  --delete-tag=scientific_name_by_db --delete-tag=obiclean_samplecount --delete-tag=obiclean_count --delete-tag=obiclean_singletoncount --delete-tag=obiclean_cluster --delete-tag=obiclean_internalcount --delete-tag=obiclean_head --delete-tag=taxid_by_db --delete-tag=obiclean_headcount --delete-tag=id_status --delete-tag=rank_by_db --delete-tag=order_name --delete-tag=order frogs_16S_EMBL_assigned.fasta > frogs_16S_EMBL_annot.fasta
+  cd /phylodata/mbalint/workdir/Stechlin_preexp
+  mkdir 11_abundance_tables
+  cd 11_abundance_tables
 
-# Sort them
-obisort -k count -r frogs_16S_own_annot.fasta > frogs_16S_own_sort.fasta
-
-obisort -k count -r frogs_16S_EMBL_annot.fasta > frogs_16S_EMBL_sort.fasta
-
-# create 16S assigned abundance matrix
-obitab -o --output-field-separator=, frogs_16S_own_sort.fasta > frogs_16S_own.tab
-
-obitab -o --output-field-separator=, frogs_16S_EMBL_sort.fasta > frogs_16S_EMBL.tab
+  # create assigned abundance matrix
+  obitab -o --output-field-separator=, ../10_assign/stechlin_assigned.fasta > stechlin_assigned.tab
+  
