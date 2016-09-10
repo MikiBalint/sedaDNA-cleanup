@@ -215,5 +215,4 @@ CAAGCAGAAGACGGCATACGAGATTTGGAGTGGTCTCGTGGGCTCGG0
   cd 11_abundance_tables
 
   # create assigned abundance matrix
-  obitab -o --output-field-separator=, ../10_assign/stechlin_assigned.fasta > stechlin_assigned.tab
-  
+  obitab -o --output-field-separator=, ../10_assign/stechlin_assigned.fasta > stechlin_assigned.csv
