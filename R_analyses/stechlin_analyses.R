@@ -12,7 +12,7 @@ library(car)
 
 ##### Read in all data
 # Read all abundance data
-EmblAssign = read.csv(file="../../../Data/Stechlin_pre-analysis/stechlin_18S_V9_160727.tab",
+EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
                       header=T, sep='|', row.names = 1)
 
 # Read POP and elements data
@@ -28,15 +28,16 @@ ExpSet = read.csv(file = "../../../Data/Stechlin_pre-analysis/sample_infos.csv",
 StatusEmbl = EmblAssign[,grepl("obiclean.status", names(EmblAssign))]
 
 # summarize the status info for each seq. variant
-EmblAssign = data.frame(EmblAssign,
-                        h_count = rowSums(StatusEmbl == "h", na.rm=T),
-                        s_count = rowSums(StatusEmbl == "s", na.rm=T), 
-                        i_count = rowSums(StatusEmbl == "i", na.rm=T))
+# redundant with the kept columns
+# EmblAssign = data.frame(EmblAssign,
+#                         h_count = rowSums(StatusEmbl == "h", na.rm=T),
+#                         s_count = rowSums(StatusEmbl == "s", na.rm=T), 
+#                         i_count = rowSums(StatusEmbl == "i", na.rm=T))
 
 # Keep only sequence variants that were seen at least once as 'head' or 
 # the 'singleton' count is higher than the 'intermediate' count
-EmblHead = EmblAssign[(EmblAssign$h_count) > 0 | 
-                        EmblAssign$s_count > EmblAssign$i_count,]
+EmblHead = EmblAssign[(EmblAssign$obiclean_headcount) > 0 | 
+                        EmblAssign$obiclean_singletoncount > EmblAssign$obiclean_internalcount,]
 
 ##### Clean up negative controls
 # Remove the maximum read number of a sequence variant 
@@ -83,17 +84,17 @@ EmblControlled[EmblControlled < 0] <- 0
 # Remove sequence variants with no reads left
 EmblControlled = EmblControlled[apply(EmblControlled[,grep("sample", names(EmblHead))],1,sum) > 0,]
 
-# Categories for sequence variants
-# Species abundance table from samples
+# I will work with OTUs, so this may be not useful
+# # Categories for sequence variants
+# # Species abundance table from samples
+# SamGregate = data.frame(name = EmblControlled$scientific_name,
+#                         EmblControlled[,grep("sample.ST", names(EmblControlled))])
+# SamCounts = aggregate(. ~ name, SamGregate, sum, na.action = na.exclude)
+# rownames(SamCounts) = SamCounts$name
+# SamCounts = SamCounts[,2:85]
+# SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
 
-SamGregate = data.frame(name = EmblControlled$scientific_name,
-                        EmblControlled[,grep("sample.ST", names(EmblControlled))])
-SamCounts = aggregate(. ~ name, SamGregate, sum, na.action = na.exclude)
-rownames(SamCounts) = SamCounts$name
-SamCounts = SamCounts[,2:85]
-SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
-
-# Write our for checking in table
+# Write sequence variants of taxa in table
 # write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
 # write.csv(file = "stechlin_seq-variant_abund_matrix.csv", SamGregate)
 write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControlled),
@@ -101,21 +102,25 @@ write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControl
                                                      seq = EmblControlled$sequence))
 
 ##### Methodology predictors of DNA data
+OTUCounts = EmblControlled[,grep("sample.ST", names(EmblControlled))]
+
+# Keep OTUs with at least some read
+OTUCounts = OTUCounts[apply(OTUCounts,1,sum) > 0,]
+
 # The data for this includes only the samples, but not the controls,
 # as these have special diversiy and compositional contraints.
 
 # Transpose the abundance matrix
-SamCountsT = t(SamCounts)
+OTUCountsT = t(OTUCounts)
 
 # The same for experimental predictors
 ExpPredictor = ExpSet[grep("ST01", rownames(ExpSet)),]
 
 # Check sample correspondence
-data.frame(rownames(SamCountsT), rownames(ExpPredictor))
+data.frame(rownames(OTUCountsT), rownames(ExpPredictor))
 
 # PCNM vectors of the plate coordinates
-PlatePCNM = pcnm(dist(ExpPredictor$column, ExpPredictor$row, method="euc"),
-                 threshold = 3)
+PlatePCNM = pcnm(dist(ExpPredictor$column, ExpPredictor$row, method="euc"))
 
 # PCNM visualizations
 par(mfrow = c(2,4), mar = c(4,4,3,1))
@@ -183,7 +188,7 @@ plot(effect("extract_order", conc.lm1, multiline=T))
 ## 2. Taxon richness and diversity
 
 # Calculate Hill's series
-CountsHill = renyi(SamCountsT, hill = T)
+CountsHill = renyi(OTUCountsT, hill = T)
 
 # 2.1. Models of Hill's H0
 H0.Model <- regsubsets(CountsHill$`0` ~ reads + kit + person + extract_order + 
@@ -200,11 +205,17 @@ subsets(H0.Model, statistic="rsq")
 # Model with highest R2
 summary.H0Model$outmat[summary.H0Model$rsq == max(summary.H0Model$rsq),]
 
-# Similarly good models
-summary.H0Model$outmat[summary.H0Model$rsq > max(summary.H0Model$rsq) - 0.02,]
+# This model is way too complex, and many other models have similar rsq.
+# I take the model with only 4 predictors that has rsq > 0.65
+H0.compare = data.frame(subset = rownames(summary.H0Model$which), summary.H0Model$rsq, summary.H0Model$which)
+# reads + kit + conc + PCNM3 + PCNM4
 
-H0.lm1 = lm(CountsHill$`0` ~ reads + person + extract_order + weight + 
-              PCNM1 + PCNM3 + PCNM6 + PCNM7, data=ExpPredictor)
+# # Similarly good models
+# summary.H0Model$outmat[summary.H0Model$rsq > max(summary.H0Model$rsq) - 0.02,]
+
+# Selected model:
+H0.lm1 = lm(CountsHill$`0` ~ reads + kit + conc + PCNM3 + PCNM4, 
+            data=ExpPredictor)
 
 # H0 model statistics
 summary(H0.lm1)
@@ -212,9 +223,15 @@ anova(H0.lm1)
 kable(anova(H0.lm1))
 
 # Plots of effects
-plot(effect("reads", H0.lm1, multiline=TRUE))
-plot(effect("weight", H0.lm1, multiline=TRUE))
-plot(effect("extract_order", H0.lm1, multiline=TRUE))
+plot(allEffects(H0.lm1))
+
+# PCNM and richness
+par(mar = c(2,2,1,1), mfrow = c(1,1))
+plot(ExpPredictor$column, ExpPredictor$row, cex=CountsHill$`0`/150, pch=19)
+ordisurf(ExpPredictor[,c(7,8)], scores(PlatePCNM, choi="PCNM4"), add = T)
+
+coef(H0.lm1)
+confint(H0.lm1)
 
 # 2.2. Models of Hill's H1
 H1.Model <- regsubsets(CountsHill$`1` ~ reads + kit + person + extract_order + 
@@ -224,16 +241,20 @@ H1.Model <- regsubsets(CountsHill$`1` ~ reads + kit + person + extract_order +
                        data=ExpPredictor, nbest=10)
 
 # Plot the model r2-s
-par(mfrow = c(1,2), mar = c(4,4,1,1))
+par(mfrow = c(1,1), mar = c(4,4,1,1))
 summary.H1Model = summary(H1.Model)
-plot(H1.Model,scale="r2")
+# plot(H1.Model,scale="r2")
 subsets(H1.Model, statistic="rsq")
 
 # Model with highest R2
 summary.H1Model$outmat[summary.H1Model$rsq == max(summary.H1Model$rsq),]
 
-H1.lm1 = lm(CountsHill$`1` ~ kit + person + extract_order + pcr_order + conc + 
-              PCNM2 + PCNM3 + PCNM4, data=ExpPredictor)
+# I take the model with only 4 predictors. rsq = 0.35877466
+H1.compare = data.frame(subset = rownames(summary.H1Model$which), summary.H1Model$rsq, summary.H1Model$which)
+# reads + person + pcr_order + weight + PCNM2
+
+# Final model
+H1.lm1 = lm(CountsHill$`1` ~ reads + person + pcr_order + weight + PCNM2, data=ExpPredictor)
 
 # H2 model statistics
 summary(H1.lm1)
@@ -241,7 +262,9 @@ anova(H1.lm1)
 kable(anova(H1.lm1))
 
 # Plots of effects
-plot(effect("pcr_order", H1.lm1, multiline=TRUE), ylab = "Hill's H1")
+plot(allEffects(H1.lm1))
+
+# plot(effect("pcr_order", H1.lm1, multiline=TRUE), ylab = "Hill's H1")
 
 # 2.3. Models of Hill's H2
 H2.Model <- regsubsets(CountsHill$`2` ~ reads + kit + person + extract_order + 
@@ -251,16 +274,19 @@ H2.Model <- regsubsets(CountsHill$`2` ~ reads + kit + person + extract_order +
                        data=ExpPredictor, nbest=10)
 
 # Plot the model r2-s
-par(mfrow = c(1,2), mar = c(4,4,1,1))
+# par(mfrow = c(1,2), mar = c(4,4,1,1))
 summary.H2Model = summary(H2.Model)
-plot(H2.Model,scale="r2")
+# plot(H2.Model,scale="r2")
 subsets(H2.Model, statistic="rsq")
 
 # Model with highest R2
-summary.H2Model$outmat[summary.H2Model$rsq == max(summary.H2Model$rsq),]
+# summary.H2Model$outmat[summary.H2Model$rsq == max(summary.H2Model$rsq),]
 
-H2.lm1 = lm(CountsHill$`2` ~ kit + person + extract_order + weight + conc + 
-              PCNM2 + PCNM3 + PCNM4, data=ExpPredictor)
+# Model with few variables but high Rsq Rsq = 
+H2.compare = data.frame(subset = rownames(summary.H2Model$which), summary.H2Model$rsq, summary.H2Model$which)
+# kit + person + extract_order + weight + conc
+
+H2.lm1 = lm(CountsHill$`2` ~ kit + person + extract_order + weight + conc, data=ExpPredictor)
 
 # H2 model statistics
 summary(H2.lm1)
@@ -268,7 +294,10 @@ anova(H2.lm1)
 kable(anova(H2.lm1))
 
 # Plots of effects
-plot(effect("extract_order", H2.lm1, multiline=TRUE), ylab = "Hill's H2")
+# plot(effect("extract_order", H2.lm1, multiline=TRUE), ylab = "Hill's H2")
+plot(allEffects(H2.lm1))
+
+# Eddig 
 
 ## 3. Community composition
 
