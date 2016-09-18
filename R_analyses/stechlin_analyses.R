@@ -5,6 +5,8 @@ library(mvabund)
 library(corrplot)
 library(leaps)
 library(car)
+library(mgcv)
+library(effects)
 # library(geosphere)
 # library(ape) # installed with ctv, infos here: http://www.phytools.org/eqg/Exercise_3.2/
 # library(vegan3d)
@@ -156,6 +158,7 @@ conc.lm2 = lm(conc ~ kit + extract_order + person + weight,
               data=ExpPredictor[5:96,])
 
 # ANOVA tables
+summary(conc.lm1)
 kable(anova(conc.lm1))
 kable(anova(conc.lm2))
 
@@ -297,96 +300,166 @@ kable(anova(H2.lm1))
 # plot(effect("extract_order", H2.lm1, multiline=TRUE), ylab = "Hill's H2")
 plot(allEffects(H2.lm1))
 
-# Eddig 
-
 ## 3. Community composition
 
-Samples.mvabund = mvabund(SamCountsT)
+# ### 3. Define core OTUs
+# ## Summarize reads
+# TotCount = apply(OTUCountsT,2,sum)
+# 
+# ## The average read number of OTUs
+# MeanCount=apply(OTUCountsT,2,function(vec) mean(vec[vec>0]))
+# 
+# ## In how many samples is an OTU present?
+# TotPresent = apply(OTUCountsT,2,function(vec) sum(vec>0))
+# 
+# ## The highest read number of an OTU in a sample
+# MaxCount=apply(OTUCountsT,2,max)
+# 
+# ## Plotting incidence against abundance
+# plot(TotPresent, MaxCount, xlab="Incidence",
+#      ylab="Maximum Abundance", pch=20)
+# 
+# plot(TotPresent, log(MaxCount), xlab="Incidence",
+#      ylab="log(Maximum Abundance)", pch=20)
+# 
+# ## Create a smoothed trendline
+# gam1 = gam(log(MaxCount)~s(TotPresent))
+# 
+# plot(gam1, residuals=T, shade=T, rug=F, cex=2.6,
+#      xlab="Incidence", ylab="logMean Abundance") # , xaxp=c(0,150,15)
+# 
+# ## consider OTUs as core if present in at least 20 samples
+# IsFreq = TotPresent >= 20
+# OTU.some = OTUCountsT[,IsFreq]
+
+core.mvabund = mvabund(OTUCountsT)
 
 # Manual stepwise model selection. Predictor order established with
 # assumptions about potential laboratory error importance, or the
-# experiences from the previous tests. Predictors considered:
-# reads + kit + person + extract_order + pcr_order + weight + conc +
-# PCNM1 + PCNM2 + PCNM3 + PCNM4 + PCNM5 + PCNM6 + PCNM7
+# experiences from the previous tests. Predictors considered: only those that were at least 
+# once significant in the previous models
+# reads + kit + person + extract_order + weight + conc + PCNM4
 
 # 3.1. Stepwise commmunity model selection
-methods.manyglm1 = manyglm(Samples.mvabund ~ reads, 
-                           data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm2 = manyglm(Samples.mvabund ~ reads + kit, 
-                           data = ExpPredictor, family = "negative.binomial")
+core.m1 = manyglm(core.mvabund ~ reads + kit + person + extract_order + weight + conc + PCNM4, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm1$AICsum
-methods.manyglm2$AICsum
+core.m2 = manyglm(core.mvabund ~ reads + kit + person + extract_order + weight + conc, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm3 = manyglm(Samples.mvabund ~ reads + person, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm3$AICsum
+anova(core.m1, core.m2, nBoot = 10)
 
-methods.manyglm4 = manyglm(Samples.mvabund ~ reads + person + extract_order, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm4$AICsum
+core.m3 = manyglm(core.mvabund ~ reads + kit + person + extract_order + weight, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm5 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             pcr_order, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm5$AICsum
+anova(core.m2, core.m3, nBoot = 10)
 
-methods.manyglm6 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             weight, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm6$AICsum
+core.m4 = manyglm(core.mvabund ~ reads + kit + person + extract_order, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm7 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             weight + conc, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm7$AICsum
+anova(core.m3, core.m4, nBoot = 10)
 
-methods.manyglm8 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             weight + conc + PCNM1, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm8$AICsum
+core.m5 = manyglm(core.mvabund ~ reads + kit + person, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm9 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             weight + conc + PCNM2, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm9$AICsum
+anova(core.m4, core.m5, nBoot = 10)
 
-methods.manyglm10 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             weight + conc + PCNM3, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm10$AICsum
+core.m6 = manyglm(core.mvabund ~ reads + kit + extract_order, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm11 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                             weight + conc + PCNM4, 
-                           data = ExpPredictor, family = "negative.binomial")
-methods.manyglm11$AICsum
+anova(core.m4, core.m6, nBoot = 10)
 
-methods.manyglm12 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                              weight + conc + PCNM5, 
-                            data = ExpPredictor, family = "negative.binomial")
-methods.manyglm12$AICsum
+core.m7 = manyglm(core.mvabund ~ reads + person + extract_order, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-methods.manyglm13 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                              weight + conc + PCNM6, 
-                            data = ExpPredictor, family = "negative.binomial")
-methods.manyglm13$AICsum
+anova(core.m4, core.m7, nBoot = 10)
 
-methods.manyglm14 = manyglm(Samples.mvabund ~ reads + person + extract_order +
-                              weight + conc + PCNM7, 
-                            data = ExpPredictor, family = "negative.binomial")
-methods.manyglm14$AICsum
+core.m8 = manyglm(core.mvabund ~ person + extract_order, 
+                  data = ExpPredictor, family = "negative.binomial")
 
-# The best model is 
-methods.manyglm7$call
-methods.manyglm7$AICsum
-plot(methods.manyglm7, which=c(1:4))
+anova(core.m4, core.m8, nBoot = 10)
 
-# 3.2. Model test
-community.anova = anova(methods.manyglm7, nBoot = 100, p.uni = "adjusted")
-kable(community.anova$table)
-community.summary = summary(methods.manyglm7, nBoot = 100, test = "LR")
-kable(community.summary$coefficients)
+# A promising community model has reads + kit + person + extract_order
+m4.anova = anova(core.m4, nBoot = 100, p.uni = "adjusted")
+m4.anova$table
+
+# 
+# 
+# methods.manyglm2 = manyglm(Samples.mvabund ~ reads + kit, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# 
+# methods.manyglm1$AICsum
+# methods.manyglm2$AICsum
+# 
+# methods.manyglm3 = manyglm(Samples.mvabund ~ reads + person, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm3$AICsum
+# 
+# methods.manyglm4 = manyglm(Samples.mvabund ~ reads + person + extract_order, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm4$AICsum
+# 
+# methods.manyglm5 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              pcr_order, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm5$AICsum
+# 
+# methods.manyglm6 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              weight, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm6$AICsum
+# 
+# methods.manyglm7 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              weight + conc, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm7$AICsum
+# 
+# methods.manyglm8 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              weight + conc + PCNM1, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm8$AICsum
+# 
+# methods.manyglm9 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              weight + conc + PCNM2, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm9$AICsum
+# 
+# methods.manyglm10 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              weight + conc + PCNM3, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm10$AICsum
+# 
+# methods.manyglm11 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                              weight + conc + PCNM4, 
+#                            data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm11$AICsum
+# 
+# methods.manyglm12 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                               weight + conc + PCNM5, 
+#                             data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm12$AICsum
+# 
+# methods.manyglm13 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                               weight + conc + PCNM6, 
+#                             data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm13$AICsum
+# 
+# methods.manyglm14 = manyglm(Samples.mvabund ~ reads + person + extract_order +
+#                               weight + conc + PCNM7, 
+#                             data = ExpPredictor, family = "negative.binomial")
+# methods.manyglm14$AICsum
+# 
+# # The best model is 
+# methods.manyglm7$call
+# methods.manyglm7$AICsum
+# plot(methods.manyglm7, which=c(1:4))
+# 
+# # 3.2. Model test
+# community.anova = anova(methods.manyglm7, nBoot = 100, p.uni = "adjusted")
+# kable(community.anova$table)
+# community.summary = summary(methods.manyglm7, nBoot = 100, test = "LR")
+# kable(community.summary$coefficients)
 
 # model-based ordination
 # Summary of overdispersion parameters
@@ -395,13 +468,14 @@ hist(methods.manyglm7$theta)
 
 # Set overdispersion prior
 set.prior = list(type = c("normal","normal","normal","uniform"),
-                 hypparams = c(100, 20, 100, 10))
+                 hypparams = c(100, 20, 100, 20))
 
 # LV ordination done on species with relatively low overdispersion
-comm.ord = boral(SamCountsT[,methods.manyglm7$theta > 10],
+comm.ord = boral(OTUCountsT[,core.m4$theta < 50],
                  family = "negative.binomial", 
                  prior.control = set.prior, num.lv = 2, n.burnin = 10, 
                  n.iteration = 100, n.thin = 1)
+
 
 # Plot the ordinations
 par(mfrow = c(2,2), mar = c(2,2,2,1))
@@ -412,6 +486,8 @@ for (i in predictors) {
   points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
   ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
 }
+
+# eddig
 
 # ordiellipse(ordi.comm, ExpPredictor$person,cex=.5, 
 #             draw="polygon", col="orange",
