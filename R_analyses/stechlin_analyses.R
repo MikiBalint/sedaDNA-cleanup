@@ -12,6 +12,9 @@ library(effects)
 # library(vegan3d)
 # library(bvenn)
 
+# Color palette
+palette(colors())
+
 ##### Read in all data
 # Read all abundance data
 EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
@@ -21,9 +24,11 @@ EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
 POP_elem = read.csv(file = "../../../Data/Stechlin_pre-analysis/stechlin_pop_elements.csv", 
                     header = T, row.names = 1)
 
+
 # Read experimental setup data
 ExpSet = read.csv(file = "../../../Data/Stechlin_pre-analysis/sample_infos.csv",
                   header = T, row.names = 1)
+
 
 ##### Filter the DNA abundance data
 # which columns have the status info for head, internal, singletons?
@@ -302,35 +307,35 @@ plot(allEffects(H2.lm1))
 
 ## 3. Community composition
 
-# ### 3. Define core OTUs
-# ## Summarize reads
-# TotCount = apply(OTUCountsT,2,sum)
-# 
-# ## The average read number of OTUs
-# MeanCount=apply(OTUCountsT,2,function(vec) mean(vec[vec>0]))
-# 
-# ## In how many samples is an OTU present?
-# TotPresent = apply(OTUCountsT,2,function(vec) sum(vec>0))
-# 
-# ## The highest read number of an OTU in a sample
-# MaxCount=apply(OTUCountsT,2,max)
-# 
-# ## Plotting incidence against abundance
-# plot(TotPresent, MaxCount, xlab="Incidence",
-#      ylab="Maximum Abundance", pch=20)
-# 
-# plot(TotPresent, log(MaxCount), xlab="Incidence",
-#      ylab="log(Maximum Abundance)", pch=20)
-# 
-# ## Create a smoothed trendline
-# gam1 = gam(log(MaxCount)~s(TotPresent))
-# 
-# plot(gam1, residuals=T, shade=T, rug=F, cex=2.6,
-#      xlab="Incidence", ylab="logMean Abundance") # , xaxp=c(0,150,15)
-# 
-# ## consider OTUs as core if present in at least 20 samples
-# IsFreq = TotPresent >= 20
-# OTU.some = OTUCountsT[,IsFreq]
+### 3. Define core OTUs
+## Summarize reads
+TotCount = apply(OTUCountsT,2,sum)
+
+## The average read number of OTUs
+MeanCount=apply(OTUCountsT,2,function(vec) mean(vec[vec>0]))
+
+## In how many samples is an OTU present?
+TotPresent = apply(OTUCountsT,2,function(vec) sum(vec>0))
+
+## The highest read number of an OTU in a sample
+MaxCount=apply(OTUCountsT,2,max)
+
+## Plotting incidence against abundance
+plot(TotPresent, MaxCount, xlab="Incidence",
+     ylab="Maximum Abundance", pch=20)
+
+plot(TotPresent, log(MaxCount), xlab="Incidence",
+     ylab="log(Maximum Abundance)", pch=20)
+
+## Create a smoothed trendline
+gam1 = gam(log(MaxCount)~s(TotPresent))
+
+plot(gam1, residuals=T, shade=T, rug=F, cex=2.6,
+     xlab="Incidence", ylab="logMean Abundance") # , xaxp=c(0,150,15)
+
+## consider OTUs as core if present in at least 20 samples
+IsFreq = TotPresent >= 20
+OTU.some = OTUCountsT[,IsFreq]
 
 core.mvabund = mvabund(OTUCountsT)
 
@@ -360,29 +365,33 @@ core.m4 = manyglm(core.mvabund ~ reads + kit + person + extract_order,
 
 anova(core.m3, core.m4, nBoot = 10)
 
-core.m5 = manyglm(core.mvabund ~ reads + kit + person, 
-                  data = ExpPredictor, family = "negative.binomial")
+# core.m5 = manyglm(core.mvabund ~ reads + kit + person, 
+#                   data = ExpPredictor, family = "negative.binomial")
+# 
+# anova(core.m4, core.m5, nBoot = 10)
+# 
+# core.m6 = manyglm(core.mvabund ~ reads + kit + extract_order, 
+#                   data = ExpPredictor, family = "negative.binomial")
+# 
+# anova(core.m4, core.m6, nBoot = 10)
+# 
+# core.m7 = manyglm(core.mvabund ~ reads + person + extract_order, 
+#                   data = ExpPredictor, family = "negative.binomial")
+# 
+# anova(core.m4, core.m7, nBoot = 10)
+# 
+# core.m8 = manyglm(core.mvabund ~ person + extract_order, 
+#                   data = ExpPredictor, family = "negative.binomial")
+# 
+# anova(core.m4, core.m8, nBoot = 10)
 
-anova(core.m4, core.m5, nBoot = 10)
+# A promising community model has reads + kit + person + extract_order + weight
+m3.anova = anova(core.m3, nBoot = 300, p.uni = "adjusted")
+m3.anova$table
 
-core.m6 = manyglm(core.mvabund ~ reads + kit + extract_order, 
-                  data = ExpPredictor, family = "negative.binomial")
-
-anova(core.m4, core.m6, nBoot = 10)
-
-core.m7 = manyglm(core.mvabund ~ reads + person + extract_order, 
-                  data = ExpPredictor, family = "negative.binomial")
-
-anova(core.m4, core.m7, nBoot = 10)
-
-core.m8 = manyglm(core.mvabund ~ person + extract_order, 
-                  data = ExpPredictor, family = "negative.binomial")
-
-anova(core.m4, core.m8, nBoot = 10)
-
-# A promising community model has reads + kit + person + extract_order
-m4.anova = anova(core.m4, nBoot = 100, p.uni = "adjusted")
-m4.anova$table
+# ## OTUs significantly explained by the affected by the experiment (at p<=0.01)
+# p.ind.anova.mc <- as.data.frame(m3.anova$uni.p)
+# colnames(p.ind.anova.mc)[p.ind.anova.mc[6,]<=0.01]
 
 # 
 # 
@@ -461,42 +470,113 @@ m4.anova$table
 # community.summary = summary(methods.manyglm7, nBoot = 100, test = "LR")
 # kable(community.summary$coefficients)
 
+# Methods BORAL
 # model-based ordination
-# Summary of overdispersion parameters
-summary(methods.manyglm7$theta)
-hist(methods.manyglm7$theta)
+# Estimate overdispersion parameters
+# mvabund input matrix
+EmblControlled[,grep("sample", names(EmblHead))]
+
+
+OTU.mvabund = mvabund(OTUCountsT)
+theta.model = manyglm(OTU.mvabund ~ data = ExpPredictor, 
+                      family = "negative.binomial")
+hist(core.m3$theta)
 
 # Set overdispersion prior
 set.prior = list(type = c("normal","normal","normal","uniform"),
                  hypparams = c(100, 20, 100, 20))
 
-# LV ordination done on species with relatively low overdispersion
+# LV ordination done on all OTUs with relatively low overdispersion
 comm.ord = boral(OTUCountsT[,core.m4$theta < 50],
                  family = "negative.binomial", 
                  prior.control = set.prior, num.lv = 2, n.burnin = 10, 
                  n.iteration = 100, n.thin = 1)
 
+# The "core" OTUs. Faster, but same patterns
+# comm.ord.some = boral(OTU.some[,core.m3$theta < 50],
+#                       X = ExpPredictor$reads,
+#                       family = "negative.binomial", 
+#                       prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+#                       n.iteration = 100, n.thin = 1)
 
-# Plot the ordinations
-par(mfrow = c(2,2), mar = c(2,2,2,1))
-predictors = c("reads", "extract_order", "weight", "conc")
-for (i in predictors) {
-  ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
-                      display = "sites", xlim = c(-0.3,0.3))
-  points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
-  ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
+# Person effects on community composition
+ordicomm = ordiplot(comm.ord.some$lv.median, choices = c(1,2), type = "none", cex =0.5,
+                    display = "sites")
+points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
+ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
+            draw="polygon", col="black",
+            alpha=200,kind="se",conf=0.95,
+            show.groups=(c("Miki")))
+ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
+            draw="polygon", col="red",
+            alpha=200,kind="se",conf=0.95,
+            show.groups=(c("Orsi")))
+
+
+# # Plot the ordinations
+# par(mfrow = c(2,2), mar = c(2,2,2,1))
+# predictors = c("reads", "extract_order", "weight", "conc")
+# for (i in predictors) {
+#   ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
+#                       display = "sites", xlim = c(-0.3,0.3))
+#   points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
+#   ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
+# }
+
+
+########
+# Community analyses
+# Variable relationships
+# Histogram of metals and pesticides
+pdf(file="POP_elem_histo.pdf", height = 10, paper = "a4")
+par(mfrow=c(6,4))
+for (i in names(POP_elem[1:21,c(3:8,14:31)])) {
+  hist(POP_elem[,i], main = i)
 }
+dev.off()
 
-# eddig
+# Element correlations
+pdf(file="POP_elem_correlations.pdf")
+corrplot(cor(na.omit(POP_elem[1:21,c(3:8,14:31)]), 
+             method = "spearman"),
+         diag = F, 
+         order = "hclust", hclust.method = "average")
+dev.off()
 
-# ordiellipse(ordi.comm, ExpPredictor$person,cex=.5, 
-#             draw="polygon", col="orange",
-#             alpha=200,kind="se",conf=0.95, 
-#             show.groups=(c("Miki")))
-# ordiellipse(ordi.comm, ExpPredictor$person,cex=.5, 
-#             draw="polygon", col="purple",
-#             alpha=200,kind="se",conf=0.95, 
-#             show.groups=(c("Orsi")))
+# cumulative correlation coefficients
+cor_POP_elem = cor(na.omit(POP_elem[1:21,c(3:8,14:31)]), 
+                   method = "spearman")
+
+# substract the diagonal and divide into two 
+# because each value is doubled
+(apply(abs(cor_POP_elem),1,sum)-1)/2
+
+# POP, elements and depth
+pdf(file="POP_elem_depth.pdf", height = 10, paper = "a4")
+par(mfrow=c(6,4), mar = c(3,3,1,1))
+for (i in names(POP_elem[,c(3:8,14:31)])) {
+  plot(POP_elem$depth[1:21], POP_elem[1:21,i], pch = 19, cex = 0.7,
+       main = i, xlab = "depth", ylab = "", type = "o")
+}
+dev.off()
+
+# Clustering of variables
+pdf(file="POP_elem_cluster.pdf")
+plot(hclust(dist(cor(na.omit(POP_elem[1:21,c(3:8,14:31)])))),
+     xlab = "")
+dev.off()
+
+# # PCA of these variables
+# POP_elem_PCA = rda(na.omit(POP_elem[1:21,c(3:8,14:31)]))
+# 
+# # PC correlations with variables
+# corrplot(cor(data.frame(POP_elem_PCA$CA$u[,1:4],
+#                         na.omit(POP_elem[1:21,c(3:8,14:31)])),
+#              method = "spearman"),
+#          diag = F,
+#          order = "hclust", hclust.method = "average")
+
+# Centering and co-plotting of pesticides, metals and OTUs
 
 ##### Pesticide, elements and eDNA visualizations
 # depths corresponding the samples
@@ -506,7 +586,7 @@ depths = read.csv(file="depths.csv", header=T)
 SamCountsT = t(SamCounts)
 
 # Z-scores of counts
-SamZ = scale(SamCountsT, center = T, scale = T)
+SamZ = scale(OTU.some, center = T, scale = T)
 
 # Center the POP and element data to get z-scores
 PE_scaled = cbind(POP_elem[,1:2], 
@@ -545,20 +625,91 @@ plot(PE_scaled$depth, seq(min(SamZ, na.rm=T), # keeping PE_scaled$depth: to use 
      type = "n",
      ylab = "Taxa", xlab = "Depth (cm)", main = "")
 for (i in names(as.data.frame(SamZ))) {
-  points(depths$depth, as.data.frame(SamZ)[,i], type = "p", col = sample(1:66), lwd=2)
+  points(depths$depth, as.data.frame(SamZ)[,i], type = "p", cex=0.8, col = sample(1:66), lwd=2)
 }
 
-corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
-         tl.cex = 0.5, tl.col = "black")
+# corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
+         # tl.cex = 0.5, tl.col = "black")
 
+# Plot the technical replicates: they should go together.
+# USe the boral community ordination. Sample names will group replicates.
 
+# LVM for replicate outliers
 
-##### Analysis of community time series
-# Only credible reads in samples are used for ecological analyses. 
+# OTU abundance matrix
+RepliMatrix = EmblHead[,grep('sample.', names(EmblHead))]
+RepliMatrix = RepliMatrix[,1:96]
+# Remove OTUs with no observations
+RepliMatrix = RepliMatrix[apply(RepliMatrix,1,sum) > 0, ]
+summary(apply(RepliMatrix, 1,sum))
 
+# Explanatory variables
+RepliExp = ExpSet[1:96,]
 
+# Estimate overdispersion parameters
 
+# mvabund input matrix
+Repli.mvabund = mvabund(t(RepliMatrix))
 
+# simple model, similar to the LVM ordination
+theta.model = manyglm(Repli.mvabund ~ reads, data = RepliExp,
+                      family = "negative.binomial")
+
+# diagnostics
+plot(theta.model, which = c(1:3))
+
+# distribution of the overdispersion parameters
+hist(theta.model$theta)
+hist(log(theta.model$theta)) # a few OTUs have weird dispersion parameters
+
+# OTUs with weird overdispersion
+rownames(RepliMatrix[theta.model$theta > 30,])
+
+# LVM model
+# Set overdispersion prior
+set.prior = list(type = c("normal","normal","normal","uniform"),
+                 hypparams = c(100, 20, 100, 20))
+
+# LVM ordination on OTUs with relatively low overdispersion
+comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
+                 family = "negative.binomial", 
+                 prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+                 n.iteration = 100, n.thin = 1)
+
+# Colors and symbols for samples
+RepliExp = data.frame(RepliExp, 
+                      symbols = c(c(rep(22,4), rep(23,2), 
+                                    rep(24,4), rep(25,2)),
+                                  na.omit(RepliExp$depth)))
+
+plot(c(1:96), c(1:96), lwd=2, 
+     col=RepliExp$symbols*10, pch = RepliExp$symbols)
+sample_colors = c(levels(factor(RepliExp$symbols*10)))
+sample_legend = c(levels(factor(RepliExp$depth)), c("Extraction control",
+                                                    "Multiplex control",
+                                                    "PCR control",
+                                                    "Mock community"))
+# depth_names = unique(factor(ExpPredictor$depth))
+pdf(file = "LVM_technical_replicates.pdf", width = 10)
+par(mfrow = c(1,1), mar = c(4,4,1,1))
+ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
+                    display = "sites")
+points(ordicomm,"sites", lwd=2, 
+       col=RepliExp$symbols*10, pch = RepliExp$symbols)
+ordispider(ordicomm, RepliExp$symbols, 
+           col=sample_colors, lwd = 2)
+ordisurf(ordicomm, RepliExp$depth, add=T, col = "grey")
+legend(-1.8, 0.8, sample_legend, border="white", bty="n", lwd = 2,
+       col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.9)
+legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/control, contours - depth", 
+       border="white", bty="n", cex = 0.9)
+# text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
+dev.off()
+
+c(levels(factor(RepliExp$depth)), c("Extraction control",
+                                    "Multiplex control",
+                                    "PCR control",
+                                    "Mock community"))
 
 
 
