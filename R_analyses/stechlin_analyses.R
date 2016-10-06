@@ -108,6 +108,7 @@ write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControl
                                                      sci = EmblControlled$scientific_name,
                                                      seq = EmblControlled$sequence))
 
+
 ##### Methodology predictors of DNA data
 OTUCounts = EmblControlled[,grep("sample.ST", names(EmblControlled))]
 
@@ -523,7 +524,6 @@ ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
 #   ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
 # }
 
-
 ########
 # Community analyses
 # Variable relationships
@@ -696,23 +696,125 @@ ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.
                     display = "sites")
 points(ordicomm,"sites", lwd=2, 
        col=RepliExp$symbols*10, pch = RepliExp$symbols)
+# color by person
+# points(ordicomm,"sites", lwd=2, 
+#        col=as.numeric(RepliExp$person)*100, pch = RepliExp$symbols)
 ordispider(ordicomm, RepliExp$symbols, 
            col=sample_colors, lwd = 2)
 ordisurf(ordicomm, RepliExp$depth, add=T, col = "grey")
 legend(-1.8, 0.8, sample_legend, border="white", bty="n", lwd = 2,
        col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.9)
+# legend for person
+# legend(-1.8, 0, levels(RepliExp$person), 
+#        border="white", bty="n", lwd = 2,
+#        col=as.numeric(as.factor(levels(RepliExp$person)))*100, 
+#        pch = 19, cex = 0.9)
 legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/control, contours - depth", 
        border="white", bty="n", cex = 0.9)
-# text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
+text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
 dev.off()
 
-c(levels(factor(RepliExp$depth)), c("Extraction control",
-                                    "Multiplex control",
-                                    "PCR control",
-                                    "Mock community"))
+
+# The mock communities seem to be pulling the weird replicates.
+# What are they?
+levels(factor(EmblHead$family_name[apply(EmblHead[,grep("sample.POS", names(EmblHead))],1,sum) > 0]))
+
+
+# Technical replicate problems, visually from the LVM plot
+# Most of these are from the first extraction replicate.
+# 6 / 8 are done by Orsi
+# # At least these
+# ST01−10−rep−1−MN_S1,
+# ST01−7−5−rep−1−MB_S90
+# ST01−9−rep−1−MB_S14
+# # More strictly these too
+# ST01−5−5−rep−1−MN_S27
+# ST01−3−5−rep−1−MB_S12
+# ST01−5−5−rep−1−MB_S66
+# ST01−3−rep−1−MB_S40
+# ST01−2−rep−1−MB_S62
+# ST01−1−rep−2−MN_S51
+# ST01−8−5−rep−1−MB_S76
+
+RepliProblems = c("ST01.10.rep.1.MN_S1",
+                  "ST01.7.5.rep.1.MB_S90",
+                  "ST01.9.rep.1.MB_S14",
+                  "ST01.5.5.rep.1.MN_S27",
+                  "ST01.3.5.rep.1.MB_S12",
+                  "ST01.5.5.rep.1.MB_S66",
+                  "ST01.3.rep.1.MB_S40",
+                  "ST01.2.rep.1.MB_S62",
+                  "ST01.1.rep.2.MN_S51",
+                  "ST01.8.5.rep.1.MB_S76")
+
+# Sample matrix with replicates
+# Only the abundances in the "samples" are in here, so no head etc. information
+SampleMatrix = EmblControlled[,grep('sample.', names(EmblControlled))]
+SampleMatrix = SampleMatrix[,1:96]
+
+# Abundance matrix without the problem replicates
+ControlMatrix = SampleMatrix[,grep(paste(rep("sample.",10), 
+                                         RepliProblems, sep = "", 
+                                         collapse = "|"), 
+                                   names(SampleMatrix), invert=T)]
+
+# Eddig
+## Remove the OTUs observed in less, than 2 replicates here
+# In how many replicates observed per sample?
+PresentReps = data.frame(row.names = rownames(AbundControlled))
+for (i in 1:length(SampleNames)){
+  ActualSet = grep(SampleNames[i], names(AbundControlled))
+  Selected = AbundControlled[ActualSet]
+  Selected[Selected > 0] <- 1 # set the read numbers to 1
+  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
+}
+colnames(PresentReps) = SampleNames
+
+# Set read numbers to 0 in a sample if the sequence variant was not observed in at least
+# two PCR replicates
+SummedControlled = SummedReps
+SummedControlled[PresentReps < 2] <- 0
+
+
+# Abundance matrix without the controls
+ControlMatrix = ControlMatrix[,grep("sample.ST", names(ControlMatrix))]
+
+# combine the replicates of samples
+# get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
+SampleNames = levels(as.factor(sapply(strsplit(names(ControlMatrix),
+                                               split='rep', fixed=TRUE),
+                                      function(x) (x[1]))))
+
+# Average the replicates for each sample
+AveragedReps = data.frame(row.names = rownames(ControlMatrix))
+for (i in 1:length(SampleNames)){
+  ActualSet = grep(SampleNames[i], names(ControlMatrix)) # grep the columns of interest
+  AveragedReps = cbind(AveragedReps, apply(ControlMatrix[ActualSet], 1, mean))
+}
+colnames(AveragedReps) = SampleNames
+# write.csv(file="test.csv", AbundControlled)
+
+# Multiply by 4 do get read numbers of four technical replicates
+SummedMatrix = round(AveragedReps*4)
+
+# In how many replicates observed per sample?
+PresentReps = data.frame(row.names = rownames(AbundControlled))
+for (i in 1:length(SampleNames)){
+  ActualSet = grep(SampleNames[i], names(AbundControlled))
+  Selected = AbundControlled[ActualSet]
+  Selected[Selected > 0] <- 1 # set the read numbers to 1
+  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
+}
+colnames(PresentReps) = SampleNames
+
+# Set read numbers to 0 in a sample if the sequence variant was not observed in at least
+# two PCR replicates
+SummedControlled = SummedReps
+SummedControlled[PresentReps < 2] <- 0
 
 
 
+# Piechart of taxonomic groups
 # frogs, humans, other aquatic stuff, etc.
 # Amphi, HighGroup, "Homo sapiens", FarmAnim, Bird, Fish, Insect, Mammal
 Amphi = c("Dendropsophus leucophyllatus","Dendropsophus melanargyreus",
@@ -760,81 +862,7 @@ pie(c(sum(SummedControlled[MetaHead$sci_name %in% Amphi,]),
                      "Birds\n4 785", "Higher groups\n1 384 940")),
     col = c(gray(0.9), gray(0.75), gray(0.60), gray(0.45), gray(0.30), gray(0.15)))
 
-sum(SummedControlled[MetaHead$sci_name %in% Amphi,])+ 
-  sum(SummedControlled[MetaHead$sci_name %in% Mammal,])+
-  sum(SummedControlled[MetaHead$sci_name %in% Fish,])+
-  sum(SummedControlled[MetaHead$sci_name %in% Insect,])+
-  sum(SummedControlled[MetaHead$sci_name %in% Bird,])+
-  sum(SummedControlled[MetaHead$sci_name %in% HighGroup,])
 
-# Farm animals:
-sum(SummedControlled[MetaHead$sci_name %in% FarmAnim,])
-
-# Humans:
-sum(SummedControlled[MetaHead$sci_name == "Homo sapiens",])
-
-# Libellulidae: 
-sum(SummedControlled[MetaHead$sci_name %in% c("Micrathyria ocellata", "Libellulidae", 
-                                              "Micrathyria", "Tramea"),])
-
-
-
-
-
-
-
-# Separate the assignment info and the abundances, so the sequence variants
-# can be aggregated according to species
-
-# Sequence assignment info
-# AssignmentInfo = data.frame(best_id = EmblControlled$best_identity.db_i18S_V9_embl125,
-#                             best_match = EmblControlled$best_match, 
-#                       count = EmblControlled$count, 
-#                       family = EmblControlled$family_name,
-#                       genus = EmblControlled$genus_name, 
-#                       rank = EmblControlled$rank,
-#                       sci_name = EmblControlled$scientific_name, 
-#                       taxid = EmblControlled$taxid, 
-#                       sequence = EmblControlled$sequence,
-#                       seq_names = rownames(EmblControlled),
-#                       row.names=10)
-# 
-# # Abundance data: get all columns that have "sample" in column names
-# AbundControlled = EmblControlled[, grepl("sample.ST", names(EmblControlled))]
-# 
-# # Controlled positive controls
-# PosControlled = EmblControlled[, grepl("sample.POS", names(EmblControlled))]
-
-
-# # combine the replicates of samples
-# # get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
-# SampleNames = levels(as.factor(sapply(strsplit(names(AbundControlled), 
-#                                                split='16S', fixed=TRUE), 
-#                                       function(x) (x[1]))))
-# 
-# # Sum the replicates for each sample
-# SummedReps = data.frame(row.names = rownames(AbundControlled))
-# for (i in 1:length(SampleNames)){
-#   ActualSet = grep(SampleNames[i], names(AbundControlled)) # grep the columns of interest
-#   SummedReps = cbind(SummedReps, apply(AbundControlled[ActualSet], 1, sum))
-# }
-# colnames(SummedReps) = SampleNames
-# # write.csv(file="test.csv", AbundControlled)
-# 
-# # In how many replicates observed per sample?
-# PresentReps = data.frame(row.names = rownames(AbundControlled))
-# for (i in 1:length(SampleNames)){
-#   ActualSet = grep(SampleNames[i], names(AbundControlled))
-#   Selected = AbundControlled[ActualSet]
-#   Selected[Selected > 0] <- 1 # set the read numbers to 1
-#   PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
-# }
-# colnames(PresentReps) = SampleNames
-# 
-# # Set read numbers to 0 in a sample if the sequence variant was not observed in at least
-# # two PCR replicates
-# SummedControlled = SummedReps
-# SummedControlled[PresentReps < 2] <- 0
 
 # Aggregate frog sequence variants according to the species 
 FrogAggregate = data.frame(name = MetaHead$sci_name[MetaHead$sci_name %in% Amphi], 
