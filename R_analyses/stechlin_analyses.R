@@ -29,7 +29,6 @@ POP_elem = read.csv(file = "../../../Data/Stechlin_pre-analysis/stechlin_pop_ele
 ExpSet = read.csv(file = "../../../Data/Stechlin_pre-analysis/sample_infos.csv",
                   header = T, row.names = 1)
 
-
 ##### Filter the DNA abundance data
 # which columns have the status info for head, internal, singletons?
 StatusEmbl = EmblAssign[,grepl("obiclean.status", names(EmblAssign))]
@@ -632,8 +631,6 @@ for (i in names(as.data.frame(SamZ))) {
          # tl.cex = 0.5, tl.col = "black")
 
 # Plot the technical replicates: they should go together.
-# USe the boral community ordination. Sample names will group replicates.
-
 # LVM for replicate outliers
 
 # OTU abundance matrix
@@ -714,12 +711,12 @@ legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/co
 text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
 dev.off()
 
-
 # The mock communities seem to be pulling the weird replicates.
 # What are they?
 levels(factor(EmblHead$family_name[apply(EmblHead[,grep("sample.POS", names(EmblHead))],1,sum) > 0]))
 
 
+# Average and sum the OK replicates
 # Technical replicate problems, visually from the LVM plot
 # Most of these are from the first extraction replicate.
 # 6 / 8 are done by Orsi
@@ -758,8 +755,16 @@ ControlMatrix = SampleMatrix[,grep(paste(rep("sample.",10),
                                          collapse = "|"), 
                                    names(SampleMatrix), invert=T)]
 
-# Eddig
-## Remove the OTUs observed in less, than 2 replicates here
+# Abundance matrix without the controls
+ControlMatrix = ControlMatrix[,grep("sample.ST", names(ControlMatrix))]
+
+# combine the replicates of samples
+# get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
+SampleNames = levels(as.factor(sapply(strsplit(names(ControlMatrix),
+                                               split='rep', fixed=TRUE),
+                                      function(x) (x[1]))))
+
+## NOT DONE - Remove the OTUs observed in less, than 2 replicates here
 # In how many replicates observed per sample?
 PresentReps = data.frame(row.names = rownames(AbundControlled))
 for (i in 1:length(SampleNames)){
@@ -774,16 +779,6 @@ colnames(PresentReps) = SampleNames
 # two PCR replicates
 SummedControlled = SummedReps
 SummedControlled[PresentReps < 2] <- 0
-
-
-# Abundance matrix without the controls
-ControlMatrix = ControlMatrix[,grep("sample.ST", names(ControlMatrix))]
-
-# combine the replicates of samples
-# get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
-SampleNames = levels(as.factor(sapply(strsplit(names(ControlMatrix),
-                                               split='rep', fixed=TRUE),
-                                      function(x) (x[1]))))
 
 # Average the replicates for each sample
 AveragedReps = data.frame(row.names = rownames(ControlMatrix))
@@ -795,24 +790,25 @@ colnames(AveragedReps) = SampleNames
 # write.csv(file="test.csv", AbundControlled)
 
 # Multiply by 4 do get read numbers of four technical replicates
+# and round the floats
 SummedMatrix = round(AveragedReps*4)
 
-# In how many replicates observed per sample?
-PresentReps = data.frame(row.names = rownames(AbundControlled))
-for (i in 1:length(SampleNames)){
-  ActualSet = grep(SampleNames[i], names(AbundControlled))
-  Selected = AbundControlled[ActualSet]
-  Selected[Selected > 0] <- 1 # set the read numbers to 1
-  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
-}
-colnames(PresentReps) = SampleNames
-
-# Set read numbers to 0 in a sample if the sequence variant was not observed in at least
-# two PCR replicates
-SummedControlled = SummedReps
-SummedControlled[PresentReps < 2] <- 0
+# Remove zero-count OTUs
+SummedMatrix = SummedMatrix[apply(SummedMatrix,1,sum) > 0,]
+# sum(SummedMatrix)
+# [1] 530604
 
 
+# Eddig
+# Order samples after depth
+gsub("sample.ST01.","ST01_",names(SummedMatrix))
+
+# 0. keep only relevant POP_elem entries
+# 1. sorting the POP_elem names will give the same order 
+# that matches names SummedMatrix.
+# 2. the "depth" from the POP_elem will re-sort the order in SummedMatrix
+# 3. the ExpSet replicates need to be summarized
+# 4. the ExpSet entries similarly sorted
 
 # Piechart of taxonomic groups
 # frogs, humans, other aquatic stuff, etc.
@@ -861,6 +857,16 @@ pie(c(sum(SummedControlled[MetaHead$sci_name %in% Amphi,]),
                      "Fish\n1 873 599", "Insects\n314 910", 
                      "Birds\n4 785", "Higher groups\n1 384 940")),
     col = c(gray(0.9), gray(0.75), gray(0.60), gray(0.45), gray(0.30), gray(0.15)))
+
+
+# Wordclouds
+
+# Explorative OTU model.
+Summed.mvabund = mvabund(t(SummedMatrix))
+
+
+
+
 
 
 
