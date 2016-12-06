@@ -90,6 +90,704 @@ EmblControlled[EmblControlled < 0] <- 0
 # Remove sequence variants with no reads left
 EmblControlled = EmblControlled[apply(EmblControlled[,grep("sample", names(EmblHead))],1,sum) > 0,]
 
+# Write sequence variants of taxa in table
+# write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
+# write.csv(file = "stechlin_seq-variant_abund_matrix.csv", SamGregate)
+write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControlled),
+                                                     sci = EmblControlled$scientific_name,
+                                                     seq = EmblControlled$sequence))
+
+# Plot all samples, replicates, controls.
+# Plot the technical replicates: they should go together.
+# LVM for replicate outliers
+
+# OTU abundance matrix
+RepliMatrix = EmblHead[,grep('sample.', names(EmblHead))]
+RepliMatrix = RepliMatrix[,1:96]
+# Remove OTUs with no observations
+RepliMatrix = RepliMatrix[apply(RepliMatrix,1,sum) > 0, ]
+summary(apply(RepliMatrix, 1,sum))
+
+# Explanatory variables
+RepliExp = ExpSet[1:96,]
+
+# Estimate overdispersion parameters
+
+# mvabund input matrix
+Repli.mvabund = mvabund(t(RepliMatrix))
+
+# simple model, similar to the LVM ordination
+theta.model = manyglm(Repli.mvabund ~ reads, data = RepliExp,
+                      family = "negative.binomial")
+
+# diagnostics
+plot(theta.model, which = c(1:3))
+
+# distribution of the overdispersion parameters
+hist(theta.model$theta)
+hist(log(theta.model$theta)) # a few OTUs have weird dispersion parameters
+
+# OTUs with weird overdispersion
+rownames(RepliMatrix[theta.model$theta > 30,])
+
+# LVM model
+# Set overdispersion prior
+set.prior = list(type = c("normal","normal","normal","uniform"),
+                 hypparams = c(100, 20, 100, 20))
+
+# LVM ordination on OTUs with relatively low overdispersion
+comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
+                 family = "negative.binomial", 
+                 prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+                 n.iteration = 100, n.thin = 1)
+
+# Colors and symbols for samples
+RepliExp = data.frame(RepliExp, 
+                      symbols = c(c(rep(22,4), rep(23,2), 
+                                    rep(24,4), rep(25,2)),
+                                  na.omit(RepliExp$depth.nominal)))
+
+plot(c(1:96), c(1:96), lwd=2, 
+     col=RepliExp$symbols*10, pch = RepliExp$symbols)
+sample_colors = c(levels(factor(RepliExp$symbols*10)))
+sample_legend = c(levels(factor(RepliExp$depth)), c("Extraction control",
+                                                    "Multiplex control",
+                                                    "PCR control",
+                                                    "Mock community"))
+# depth_names = unique(factor(ExpPredictor$depth))
+# pdf(file = "LVM_technical_replicates.pdf", width = 10)
+par(mfrow = c(1,1), mar = c(4,4.5,1,1))
+ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
+                    display = "sites", xlab = "Community axis 1",
+                    ylab = "Community axis 2", cex.lab = 1.5)
+points(ordicomm,"sites", lwd=2, 
+       col=RepliExp$symbols*10, pch = RepliExp$symbols)
+# color by person
+# points(ordicomm,"sites", lwd=2, 
+#        col=as.numeric(RepliExp$person)*100, pch = RepliExp$symbols)
+ordispider(ordicomm, RepliExp$symbols, 
+           col=sample_colors, lwd = 2)
+ordisurf(ordicomm, RepliExp$depth, add=T, col = "darkgrey")
+# legend(-1.8, 0.8, sample_legend, border="white", bty="n", lwd = 2,
+# col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.9)
+# legend for person
+# legend(-1.8, 0, levels(RepliExp$person), 
+#        border="white", bty="n", lwd = 2,
+#        col=as.numeric(as.factor(levels(RepliExp$person)))*100, 
+#        pch = 19, cex = 0.9)
+# legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/control, contours - depth", 
+# border="white", bty="n", cex = 0.9)
+# text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
+# dev.off()
+
+# plot for technical replicate explanation
+
+ExplainColors = RepliExp$symbols
+ExplainColors[ExplainColors != 10] <- 0
+
+ExplainSampleColors = c(levels(factor(RepliExp$symbols*10)))
+ExplainSampleColors[ExplainSampleColors != 100] <- 0
+
+par(mfrow = c(1,1), mar = c(4,4,1,1))
+ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
+                    display = "sites")
+points(ordicomm, "sites", lwd=2, 
+       col=ExplainColors*10, pch = RepliExp$symbols)
+# color by person
+# points(ordicomm,"sites", lwd=2, 
+#        col=as.numeric(RepliExp$person)*100, pch = RepliExp$symbols)
+ordispider(ordicomm$sites, RepliExp$symbols, 
+           col=ExplainSampleColors, lwd = 2)
+ordisurf(ordicomm, RepliExp$depth, add=T, col = "grey")
+legend(-1.8, 0.8, sample_legend, border="white", bty="n", lwd = 2,
+       col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.9)
+# legend for person
+# legend(-1.8, 0, levels(RepliExp$person), 
+#        border="white", bty="n", lwd = 2,
+#        col=as.numeric(as.factor(levels(RepliExp$person)))*100, 
+#        pch = 19, cex = 0.9)
+legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/control, contours - depth", 
+       border="white", bty="n", cex = 0.9)
+# text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
+
+# The mock communities seem to be pulling the weird replicates.
+# What are they?
+levels(factor(EmblHead$family_name[apply(EmblHead[,grep("sample.POS", names(EmblHead))],1,sum) > 0]))
+
+
+# Average and sum the OK replicates
+# Technical replicate problems, visually from the LVM plot
+# Most of these are from the first extraction replicate.
+# 6 / 8 are done by Orsi
+# # At least these
+# ST01−10−rep−1−MN_S1,
+# ST01−7−5−rep−1−MB_S90
+# ST01−9−rep−1−MB_S14
+# # More strictly these too
+# ST01−5−5−rep−1−MN_S27
+# ST01−3−5−rep−1−MB_S12
+# ST01−5−5−rep−1−MB_S66
+# ST01−3−rep−1−MB_S40
+# ST01−2−rep−1−MB_S62
+# ST01−1−rep−2−MN_S51
+# ST01−8−5−rep−1−MB_S76
+
+RepliProblems = c("ST01.10.rep.1.MN_S1",
+                  "ST01.7.5.rep.1.MB_S90",
+                  "ST01.9.rep.1.MB_S14",
+                  "ST01.5.5.rep.1.MN_S27",
+                  "ST01.3.5.rep.1.MB_S12",
+                  "ST01.5.5.rep.1.MB_S66",
+                  "ST01.3.rep.1.MB_S40",
+                  "ST01.2.rep.1.MB_S62",
+                  "ST01.1.rep.2.MN_S51",
+                  "ST01.8.5.rep.1.MB_S76")
+
+# Sample matrix with replicates
+# Only the abundances in the "samples" are in here, so no head etc. information
+SampleMatrix = EmblControlled[,grep('sample.', names(EmblControlled))]
+SampleMatrix = SampleMatrix[,1:96]
+
+# Abundance matrix without the problem replicates
+ControlMatrix = SampleMatrix[,grep(paste(rep("sample.",10), 
+                                         RepliProblems, sep = "", 
+                                         collapse = "|"), 
+                                   names(SampleMatrix), invert=T)]
+
+# Abundance matrix without the controls
+ControlMatrix = ControlMatrix[,grep("sample.ST", names(ControlMatrix))]
+
+# combine the replicates of samples
+# get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
+SampleNames = levels(as.factor(sapply(strsplit(names(ControlMatrix),
+                                               split='rep', fixed=TRUE),
+                                      function(x) (x[1]))))
+
+## NOT DONE - Remove the OTUs observed in less, than 2 replicates here
+# In how many replicates observed per sample?
+PresentReps = data.frame(row.names = rownames(AbundControlled))
+for (i in 1:length(SampleNames)){
+  ActualSet = grep(SampleNames[i], names(AbundControlled))
+  Selected = AbundControlled[ActualSet]
+  Selected[Selected > 0] <- 1 # set the read numbers to 1
+  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
+}
+colnames(PresentReps) = SampleNames
+
+# Set read numbers to 0 in a sample if the sequence variant was not observed in at least
+# two PCR replicates
+SummedControlled = SummedReps
+SummedControlled[PresentReps < 2] <- 0
+
+# Average the replicates for each sample
+AveragedReps = data.frame(row.names = rownames(ControlMatrix))
+for (i in 1:length(SampleNames)){
+  ActualSet = grep(SampleNames[i], names(ControlMatrix)) # grep the columns of interest
+  AveragedReps = cbind(AveragedReps, apply(ControlMatrix[ActualSet], 1, mean))
+}
+colnames(AveragedReps) = SampleNames
+# write.csv(file="test.csv", AbundControlled)
+
+
+# Taxon recovery in positive controls
+PosCont = grep("^sample.POS", names(EmblControlled))
+
+# Abundances in positives and taxonomic annotations
+PosAbundances = EmblControlled[,c(PosCont,409,10,9)]
+
+# Sums of all reads / OTU and add to positive table
+SumReads = apply(EmblControlled[,grep("sample.[EMPS]", names(EmblControlled))], 1, sum)
+PosAbundances = cbind(PosAbundances, SumReads)
+
+# keep only OTUs that had reads
+PosAbundances = PosAbundances[apply(PosAbundances[,1:2],1,sum) > 0,]
+
+# write out positive control samples + scientific name + genus + family name
+write.csv(file="positive_controls.csv", PosAbundances)
+
+# Lake_diversity/Analyses/stechlin_analyses/R_analyses/Positive_controls/positive_controls.xlsx
+
+
+# Methods BORAL
+# model-based ordination
+# Estimate overdispersion parameters
+# mvabund input matrix
+EmblControlled[,grep("sample", names(EmblHead))]
+
+
+OTU.mvabund = mvabund(OTUCountsT)
+theta.model = manyglm(OTU.mvabund ~ data = ExpPredictor, 
+                      family = "negative.binomial")
+hist(core.m3$theta)
+
+# Set overdispersion prior
+set.prior = list(type = c("normal","normal","normal","uniform"),
+                 hypparams = c(100, 20, 100, 20))
+
+# LV ordination done on all OTUs with relatively low overdispersion
+comm.ord = boral(OTUCountsT[,core.m4$theta < 50],
+                 family = "negative.binomial", 
+                 prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+                 n.iteration = 100, n.thin = 1)
+
+# The "core" OTUs. Faster, but same patterns
+# comm.ord.some = boral(OTU.some[,core.m3$theta < 50],
+#                       X = ExpPredictor$reads,
+#                       family = "negative.binomial", 
+#                       prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+#                       n.iteration = 100, n.thin = 1)
+
+# Person effects on community composition
+ordicomm = ordiplot(comm.ord.some$lv.median, choices = c(1,2), type = "none", cex =0.5,
+                    display = "sites")
+points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
+ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
+            draw="polygon", col="black",
+            alpha=200,kind="se",conf=0.95,
+            show.groups=(c("Miki")))
+ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
+            draw="polygon", col="red",
+            alpha=200,kind="se",conf=0.95,
+            show.groups=(c("Orsi")))
+
+
+# # Plot the ordinations
+# par(mfrow = c(2,2), mar = c(2,2,2,1))
+# predictors = c("reads", "extract_order", "weight", "conc")
+# for (i in predictors) {
+#   ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
+#                       display = "sites", xlim = c(-0.3,0.3))
+#   points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
+#   ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
+# }
+
+########
+# Community analyses
+# Variable relationships
+# Histogram of metals and pesticides
+pdf(file="POP_elem_histo.pdf", height = 10, paper = "a4")
+par(mfrow=c(6,4))
+for (i in names(POP_elem[1:21,c(3:8,14:31)])) {
+  hist(POP_elem[,i], main = i)
+}
+dev.off()
+
+# Element correlations
+pdf(file="POP_elem_correlations.pdf")
+corrplot(cor(na.omit(POP_elem[1:21,c(2,4:9,15:32)]), 
+             method = "spearman"),
+         diag = F, 
+         order = "hclust", hclust.method = "average")
+dev.off()
+
+# POP, elements and depth
+pdf(file="POP_elem_depth.pdf", height = 10, paper = "a4r")
+par(mfrow=c(6,4), mar = c(3,3,1,1))
+for (i in names(POP_elem[,c(4:9,15:32)])) {
+  plot(POP_elem$depth[1:21], POP_elem[1:21,i], pch = 19, cex = 0.7,
+       main = i, xlab = "depth", ylab = "", type = "o")
+  abline(v=2.9, col="red")
+  abline(v=6.7, col="red")
+}
+dev.off()
+
+# Clustering of variables
+pdf(file="POP_elem_cluster.pdf")
+plot(hclust(dist(cor(na.omit(POP_elem[1:21,c(2,4:9,15:32)])))),
+     xlab = "")
+dev.off()
+
+# # PCA of these variables
+# POP_elem_PCA = rda(na.omit(POP_elem[1:21,c(3:8,14:31)]))
+# 
+# # PC correlations with variables
+# corrplot(cor(data.frame(POP_elem_PCA$CA$u[,1:4],
+#                         na.omit(POP_elem[1:21,c(3:8,14:31)])),
+#              method = "spearman"),
+#          diag = F,
+#          order = "hclust", hclust.method = "average")
+
+# Centering and co-plotting of pesticides, metals and OTUs
+
+##### Pesticide, elements and eDNA visualizations
+# depths corresponding the samples
+depths = read.csv(file="depths.csv", header=T)
+
+# Transposed species abundance matrix
+SamCountsT = t(SamCounts)
+
+# Z-scores of counts
+SamZ = scale(OTU.some, center = T, scale = T)
+
+# Center the POP and element data to get z-scores
+PE_scaled = cbind(POP_elem[,1:2], 
+                  scale(POP_elem[,c(4:7, 15:length(names(POP_elem)))], 
+                        center = T, scale = T))
+
+# Plot together with elements and POPs
+par(mfrow = c(1,3))
+# POP
+par(mar = c(2,3,2,0))
+plot(seq(min(PE_scaled[,3:7], na.rm=T), 
+         max(PE_scaled[,3:7], na.rm=T), 
+         (max(PE_scaled[,3:7], na.rm=T) - 
+            min(PE_scaled[,3:7], na.rm=T))/(nrow(PE_scaled)-1)),
+     PE_scaled$depth, 
+     type = "n", cex.axis = 1.3,
+     ylim = rev(range(PE_scaled$depth)),
+     main = "Pesticides", xlab = "Depth (cm)")
+for (i in names(PE_scaled[3:7])){
+  points(PE_scaled[,i], PE_scaled$depth, 
+         type = "l", col = sample(90:99), lwd=2)
+}
+
+# Elements
+par(mar = c(2,1,2,1))
+plot(seq(min(PE_scaled[,8:ncol(PE_scaled)], na.rm=T), 
+         max(PE_scaled[,8:ncol(PE_scaled)], na.rm=T), 
+         (max(PE_scaled[,8:ncol(PE_scaled)], na.rm=T) - 
+            min(PE_scaled[,8:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
+     PE_scaled$depth, 
+     type = "n", yaxt = "n", cex.axis = 1.3,
+     ylim = rev(range(PE_scaled$depth)),
+     main = "Metals", xlab = "Depth (cm)")
+for (i in names(PE_scaled[8:ncol(PE_scaled)])){
+  points(PE_scaled[,i], PE_scaled$depth, 
+         type = "l", col = sample(150:159), lwd=2)
+}
+
+# Taxa
+par(mar = c(2,0,2,3))
+plot(seq(min(SamZ, na.rm=T), # keeping PE_scaled$depth: to use the same depth range 
+         max(SamZ, na.rm=T), 
+         (max(SamZ, na.rm=T) - 
+            min(SamZ, na.rm=T))/(nrow(PE_scaled)-1)), 
+     PE_scaled$depth,
+     ylim = rev(range(PE_scaled$depth)),
+     type = "n", yaxt = "n", cex.axis = 1.3,
+     main = "Taxa", xlab = "Depth (cm)")
+for (i in names(as.data.frame(SamZ))) {
+  points(as.data.frame(SamZ)[,i], depths$depth, type = "p", 
+         cex=0.8, col = sample(20:29), lwd=2)
+}
+axis(4, at = pretty(PE_scaled$depth, 5), 
+     labels = pretty(rev(PE_scaled$depth), 5), 
+     cex.axis = 1.3)
+
+# corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
+         # tl.cex = 0.5, tl.col = "black")
+
+# Multiply by 4 do get read numbers of four technical replicates
+# and round the floats
+SummedMatrix = round(AveragedReps*4)
+
+# Remove zero-count OTUs
+SummedMatrix = SummedMatrix[apply(SummedMatrix,1,sum) > 0,]
+# sum(SummedMatrix)
+# [1] 530604
+
+# rename SummedMatrix column names
+names(SummedMatrix) <- gsub("sample.ST01.","ST01_",names(SummedMatrix))
+
+# Summarize all predictors for the 21 horizons
+# 0. keep only relevant POP_elem entries
+POP_short = POP_elem[1:21,]
+
+# 1. ordering the POP_short names will give the same order 
+# that matches names SummedMatrix.
+POP_shortReord = POP_short[order(rownames(POP_short)),]
+
+# 2. the "depth" from the POP_elem will re-sort the order in SummedMatrix
+names(SummedMatrix)[order(POP_shortReord$depth)]
+SummedMatrixReord = SummedMatrix[,order(POP_shortReord$depth)]
+
+# 3. the RepliExp replicates need to be summarized
+# This is still ugly.
+RepliProblems2 = c("ST01-10-rep-1-MN_S1",
+                   "ST01-7-5-rep-1-MB_S90",
+                   "ST01-9-rep-1-MB_S14",
+                   "ST01-5-5-rep-1-MN_S27",
+                   "ST01-3-5-rep-1-MB_S12",
+                   "ST01-5-5-rep-1-MB_S66",
+                   "ST01-3-rep-1-MB_S40",
+                   "ST01-2-rep-1-MB_S62",
+                   "ST01-1-rep-2-MN_S51",
+                   "ST01-8-5-rep-1-MB_S76")
+
+# remove the controls
+ToSumExp = RepliExp[13:96,]
+
+# remove problematic replicates
+ToSumExp = ToSumExp[grep(paste(RepliProblems2, 
+                               collapse = "|"), 
+                         rownames(ToSumExp), invert=T),]
+
+# write out what needs to be combined
+write.csv(file = "sum_explanatories.csv", ToSumExp)
+
+# read in combined explanatories
+SummedExp = read.csv(file = "averaged_explanatories.csv", header = T,
+                     row.names = 1)
+
+# Correct rownames
+rownames(SummedExp) = as.factor(sapply(strsplit(rownames(SummedExp),
+                                                split='-rep', fixed=TRUE),
+                                       function(x) (x[1])))
+
+# Multiply by 4 to get original (or estimated) read numbers 
+# from all replicates
+SummedExp$conc <- SummedExp$conc*4
+SummedExp$reads <- SummedExp$reads*4
+
+# # Sample names for experimental variables
+# SampleNamesExp = levels(as.factor(sapply(strsplit(rownames(ToSumExp),
+#                                                split='-rep', fixed=TRUE),
+#                                       function(x) (x[1]))))
+# 
+# # Create the dataframe
+# SummedExp = data.frame(row.names = SampleNamesExp)
+# 
+# # averaged reads
+# for (i in 1:length(SummedExp)){
+#   ActualSet = grep(SampleNamesExp[i], rownames(ToSumExp), fixed=T) # grep the columns of interest
+#   AveragedReps = cbind(SummedExp, reads = apply(ToSumExp[ActualSet], 1, mean))
+# }
+# colnames(AveragedReps) = SampleNames
+# grep(SampleNamesExp[3], rownames(ToSumExp), fixed=T)
+
+# 4. Reorder Explanatory matrix
+SummedExpReord = SummedExp[order(SummedExp$depth),]
+
+# 4. Are all entries in all dataframes ordered the same way?
+data.frame(POP = rownames(POP_short),
+           Exp = rownames(SummedExpReord),
+           OTU = rownames(t(SummedMatrixReord)))
+
+# 5. correlation structures in POP_short
+# pdf(file="POP_elem_correlations.pdf")
+corrplot(cor(na.omit(POP_short[,c(2:8,14:31)]), 
+             method = "pearson"),
+         diag = F, 
+         order = "hclust", hclust.method = "average")
+# dev.off()
+
+# Most POPs and metals are correlated. 
+# DDT has very few data, I leave it out.
+# relatively not correlated with others: TF, Mo, Na, 
+# but they are hard to interpret
+# Finally, I will use depth alone as substitute for all others
+
+# NOT DONE: I will use the POP/metal with the highest correlation coefficient
+# for the autocorrelated group
+
+# Are they correctly selected? 
+corrplot(cor(na.omit(POP_short[,c(3:6,15:27,30:31)]),
+             method = "pearson"),
+         diag = F, 
+         order = "hclust", hclust.method = "average")
+
+# cumulative correlation coefficients
+cor_POP_elem = cor(na.omit(POP_short[,c(2:6,15:27,30:31)]), 
+                   method = "spearman")
+
+# substract the diagonal and divide into two 
+# because each value is doubled
+max((apply(abs(cor_POP_elem),1,sum)-1)/2) # As has the highest cum cor coef
+
+# OTUs in at least two horizons
+TotPresent = apply(t(SummedMatrixReord),2,function(vec) sum(vec>0))
+OTU.some = SummedMatrixReord[TotPresent > 2,]
+OTU.some = as.data.frame(t(OTU.some))
+
+# Models of community composition
+OTUSummed.mva = mvabund(OTU.some)
+
+# full model. TF is weird. Mo and Na is hard to interpret. 
+OTU.m1 = manyglm(OTUSummed.mva ~ 
+                   SummedExpReord$reads +
+                   SummedExpReord$person +
+                   SummedExpReord$depth,
+                 family = "negative.binomial")
+
+# diagnostic plot
+plot(OTU.m1, which = c(1:3))
+
+# Variation partitioning
+anova.OTU.m1 = anova(OTU.m1, nBoot = 100, p.uni = "adjusted")
+
+# With AKW times
+# Add AKW operation to variables
+POP_short = data.frame(POP_short, 
+                       akw = c(rep("post",4), c(rep("akw",10)), c(rep("pre",7))))
+
+POP_short = data.frame(POP_short, 
+                       akw2 = c(rep("NoAkw",4), c(rep("Akw",10)), c(rep("NoAkw",7))))
+
+OTU.m3 = manyglm(OTUSummed.mva ~ depth + akw,
+                 data=POP_short,
+                 family = "negative.binomial")
+
+OTU.m4 = manyglm(OTUSummed.mva ~ depth + akw2,
+                 data=POP_short,
+                 family = "negative.binomial")
+
+OTU.m3$AICsum
+OTU.m4$AICsum
+
+OTU.m5 = manyglm(OTUSummed.mva ~ depth*akw,
+                 data=POP_short,
+                 family = "negative.binomial")
+
+OTU.m5$AICsum
+
+anova.OTU.m5 = anova(OTU.m5, nBoot = 50)
+anova.OTU.m5$table
+
+summary.OTU.m5 = summary(OTU.m5, nBoot = 50)
+
+# How OTUs change?
+# OTUs stat. significantly explained by depth
+p.ind.anova <- as.data.frame(anova.OTU.m1$uni.p)
+colnames(p.ind.anova)[p.ind.anova[4,]<=0.5]
+
+# OTUs with abs(coef) - abs(stderr) > 0 (reliable abundance change)
+# Depth
+StrongCoefDepth = abs(OTU.m1$coefficients["SummedExpReord$depth",]) - 
+  abs(OTU.m1$stderr.coefficients["SummedExpReord$depth",]) > 0
+
+NamesDepth = names(StrongCoefDepth[StrongCoefDepth == T])
+
+# plot(fitted(OTU.m1)[,"M01271.3.000000000.D0YHF.1.1101.19713.24293_CONS_SUB"],
+#      SummedExpReord$depth)
+plot(OTU.some$`M01271:3:000000000-D0YHF:1:1101:13412:13277_CONS_SUB`,
+    SummedExpReord$depth)
+
+# LVM of horizons
+# simple model, similar to the LVM ordination
+OTU.m0 = manyglm(OTUSummed.mva ~ 
+                   SummedExpReord$reads,
+                 family = "negative.binomial")
+
+# diagnostics
+plot(OTU.m0, which = c(1:3))
+
+# distribution of the overdispersion parameters
+hist(OTU.m0$theta)
+hist(log(OTU.m0$theta)) # a few OTUs have weird dispersion parameters
+
+# OTUs with weird overdispersion
+names(OTU.some[,OTU.m0$theta > 30])
+
+# LVM model
+# Set overdispersion prior
+set.prior = list(type = c("normal","normal","normal","uniform"),
+                 hypparams = c(100, 20, 100, 20))
+
+# LVM ordination of horizons
+horizon.comm.ord = boral(OTU.some[,OTU.m0$theta < 30],
+                         X = SummedExpReord$reads,
+                         family = "negative.binomial", 
+                         prior.control = set.prior, num.lv = 2, n.burnin = 10, 
+                         n.iteration = 100, n.thin = 1)
+
+# gradient colors
+colorfunk = colorRampPalette(c("green", "brown"))
+
+# try colors
+plot(c(1:21), c(1:21), lwd=3, 
+     col=colorfunk(21), pch = SummedExpReord$depth_nominal+1)
+
+
+
+# depth_names = unique(factor(ExpPredictor$depth))
+# pdf(file = "LVM_technical_replicates.pdf", width = 10)
+par(mfrow = c(1,1), mar = c(4,4.5,1,1))
+hor.ordicomm = ordiplot(horizon.comm.ord$lv.median, choices = c(1,2), type = "none",
+                    display = "sites",
+                    cex.axis = 1.3, cex.lab = 1.3)
+points(hor.ordicomm,"sites", lwd=4, 
+       col=colorfunk(21), 
+       pch = SummedExpReord$depth_nominal+1,
+       cex = 1.5)
+legend(-0.05, 0.08, SummedExpReord$depth, border="white", 
+       col=colorfunk(21), 
+       pch = SummedExpReord$depth_nominal+1, 
+       cex = 1, bty="n", lwd = 2, ncol = 2)
+ordisurf(hor.ordicomm, POP_short$DDE4.4, 
+         add=T, col = "red", lwd = 1.5, cex = 1.3)
+ordisurf(hor.ordicomm, POP_short$depth, 
+         add=T, col = "black", lwd = 1.5, cex = 1.3)
+# ordisurf(hor.ordicomm, POP_short$As.193.696, 
+#          add=T, col = "green", lwd = 2, cex = 1.3)
+# ordisurf(hor.ordicomm, POP_short$Pb.217.000, 
+#          add=T, col = "yellow", lwd = 2, cex = 1.3)
+# ordisurf(hor.ordicomm, POP_short$Ca.220.861, 
+#          add=T, col = "blue", lwd = 2, cex = 1.3)
+# ordisurf(hor.ordicomm, POP_short$Mo.201.512, 
+#          add=T, col = "green", lwd = 2, cex = 1.3)
+# dev.off()
+
+# SOM2: species modelled separately - for species-specific methodological differences
+# Detection probabilities for each species per method
+SOM2.p = read.csv(file = "SOM/SOM2_detection_prob.csv", row.names = 1, header=T)
+
+# False positives, each species per method
+SOM2.fp = SOM2.p = read.csv(file = "SOM/SOM2_false_pos.csv", row.names = 1, header=T)
+
+# Coefficient plots
+par(mfrow=c(1,3), mar=c(4.1,1,0.5,0.5))
+plot(rep(0,nrow(SOM2.p)), c(nrow(SOM2.p):1), type="n", 
+     bty="n", xaxt="n", yaxt="n", xlab="", ylab="")
+plot(SOM2.p[,"pA_estimate"], c(nrow(SOM2.p):1)-0.2, 
+     xlim=c(0,0.5), yaxt="n",
+     xlab="Detection probability", ylab="", pch=19, cex=0.5, 
+     ylim=c(nrow(SOM2.p),1))
+points(SOM2.p[,"pB_estimate"], c(nrow(SOM2.p):1), pch=17, cex=0.5)
+points(SOM2.p[,"pC_estimate"], c(nrow(SOM2.p):1)+0.2, pch=15, cex=0.5)
+segments(SOM2.p$pA_2.5..CI, c(nrow(SOM2.p):1)-0.2, 
+         SOM2.p$pA_97.5..CI, c(nrow(SOM2.p):1)-0.2)
+segments(SOM2.p$pB_2.5..CI, c(nrow(SOM2.p):1), 
+         SOM2.p$pB_97.5..CI, c(nrow(SOM2.p):1))
+segments(SOM2.p$pC_2.5..CI, c(nrow(SOM2.p):1)+0.2, 
+         SOM2.p$pC_97.5..CI, c(nrow(SOM2.p):1)+0.2)
+for(i in 1:nrow(SOM2.p)){
+  lines(c(-0,1), c(i,i)-0.5, lty="dotted")
+}
+axis(2, at=c(nrow(SOM2.p):1), label=rownames(SOM2.p), las=1, cex.axis=0.9,
+     tick=F)
+plot(SOM2.fp[,"pA_estimate"], c(nrow(SOM2.p):1)-0.2, 
+     xlim=c(0,0.5), yaxt="n",
+     xlab="False positives", ylab="", pch=19, cex=0.5, 
+     ylim=c(nrow(SOM2.p),1))
+points(SOM2.fp[,"pB_estimate"], c(nrow(SOM2.fp):1), pch=17, cex=0.5)
+points(SOM2.fp[,"pC_estimate"], c(nrow(SOM2.fp):1)+0.2, pch=15, cex=0.5)
+segments(SOM2.fp$pA_2.5..CI, c(nrow(SOM2.fp):1)-0.2, 
+         SOM2.fp$pA_97.5..CI, c(nrow(SOM2.fp):1)-0.2)
+segments(SOM2.fp$pB_2.5..CI, c(nrow(SOM2.fp):1), 
+         SOM2.fp$pB_97.5..CI, c(nrow(SOM2.fp):1))
+segments(SOM2.fp$pC_2.5..CI, c(nrow(SOM2.fp):1)+0.2, 
+         SOM2.fp$pC_97.5..CI, c(nrow(SOM2.fp):1)+0.2)
+for(i in 1:nrow(SOM2.p)){
+  lines(c(-0,1), c(i,i)-0.5, lty="dotted")
+}
+
+
+par(mar = c(4.5,1,2,1))
+plot(POP_short$depth ~ POP_short$Pb.217.000,
+     pch = 19, type = "o", lwd = 1.5,
+     ylim = rev(range(POP_short$depth)),
+     main = "Pb", xlab = "mg / kg", ylab = "",
+     cex.main = 2, cex.axis = 1.5, cex.lab = 1.5,
+     yaxt = "n")
+
+plot(POP_short$depth ~ POP_short$DDE4.4,
+     pch = 19, type = "o", lwd = 1.5,
+     ylim = rev(range(POP_short$depth)),
+     main = "DDE 4.4", xlab = "ug / kg", ylab = "",
+     cex.main = 2, cex.axis = 1.5, cex.lab = 1.5,
+     yaxt = "n")
+
+
 # I will work with OTUs, so this may be not useful
 # # Categories for sequence variants
 # # Species abundance table from samples
@@ -99,14 +797,6 @@ EmblControlled = EmblControlled[apply(EmblControlled[,grep("sample", names(EmblH
 # rownames(SamCounts) = SamCounts$name
 # SamCounts = SamCounts[,2:85]
 # SamCounts = SamCounts[apply(SamCounts,1,sum) > 0,]
-
-# Write sequence variants of taxa in table
-# write.csv(file = "stechlin_taxon_abund_matrix.csv", SamCounts)
-# write.csv(file = "stechlin_seq-variant_abund_matrix.csv", SamGregate)
-write.csv(file = "variant_sequences.csv", data.frame(name = rownames(EmblControlled),
-                                                     sci = EmblControlled$scientific_name,
-                                                     seq = EmblControlled$sequence))
-
 
 ##### Methodology predictors of DNA data
 OTUCounts = EmblControlled[,grep("sample.ST", names(EmblControlled))]
@@ -468,654 +1158,3 @@ m3.anova$table
 # kable(community.anova$table)
 # community.summary = summary(methods.manyglm7, nBoot = 100, test = "LR")
 # kable(community.summary$coefficients)
-
-# Methods BORAL
-# model-based ordination
-# Estimate overdispersion parameters
-# mvabund input matrix
-EmblControlled[,grep("sample", names(EmblHead))]
-
-
-OTU.mvabund = mvabund(OTUCountsT)
-theta.model = manyglm(OTU.mvabund ~ data = ExpPredictor, 
-                      family = "negative.binomial")
-hist(core.m3$theta)
-
-# Set overdispersion prior
-set.prior = list(type = c("normal","normal","normal","uniform"),
-                 hypparams = c(100, 20, 100, 20))
-
-# LV ordination done on all OTUs with relatively low overdispersion
-comm.ord = boral(OTUCountsT[,core.m4$theta < 50],
-                 family = "negative.binomial", 
-                 prior.control = set.prior, num.lv = 2, n.burnin = 10, 
-                 n.iteration = 100, n.thin = 1)
-
-# The "core" OTUs. Faster, but same patterns
-# comm.ord.some = boral(OTU.some[,core.m3$theta < 50],
-#                       X = ExpPredictor$reads,
-#                       family = "negative.binomial", 
-#                       prior.control = set.prior, num.lv = 2, n.burnin = 10, 
-#                       n.iteration = 100, n.thin = 1)
-
-# Person effects on community composition
-ordicomm = ordiplot(comm.ord.some$lv.median, choices = c(1,2), type = "none", cex =0.5,
-                    display = "sites")
-points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
-ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
-            draw="polygon", col="black",
-            alpha=200,kind="se",conf=0.95,
-            show.groups=(c("Miki")))
-ordiellipse(ordicomm, ExpPredictor$person,cex=.5,
-            draw="polygon", col="red",
-            alpha=200,kind="se",conf=0.95,
-            show.groups=(c("Orsi")))
-
-
-# # Plot the ordinations
-# par(mfrow = c(2,2), mar = c(2,2,2,1))
-# predictors = c("reads", "extract_order", "weight", "conc")
-# for (i in predictors) {
-#   ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
-#                       display = "sites", xlim = c(-0.3,0.3))
-#   points(ordicomm,"sites", pch=20, col=as.numeric(ExpPredictor$person))
-#   ordisurf(ordicomm, ExpPredictor[,i], add=T, col = "black", main=i)
-# }
-
-########
-# Community analyses
-# Variable relationships
-# Histogram of metals and pesticides
-pdf(file="POP_elem_histo.pdf", height = 10, paper = "a4")
-par(mfrow=c(6,4))
-for (i in names(POP_elem[1:21,c(3:8,14:31)])) {
-  hist(POP_elem[,i], main = i)
-}
-dev.off()
-
-# Element correlations
-pdf(file="POP_elem_correlations.pdf")
-corrplot(cor(na.omit(POP_elem[1:21,c(2,4:9,15:32)]), 
-             method = "spearman"),
-         diag = F, 
-         order = "hclust", hclust.method = "average")
-dev.off()
-
-# POP, elements and depth
-pdf(file="POP_elem_depth.pdf", height = 10, paper = "a4r")
-par(mfrow=c(6,4), mar = c(3,3,1,1))
-for (i in names(POP_elem[,c(4:9,15:32)])) {
-  plot(POP_elem$depth[1:21], POP_elem[1:21,i], pch = 19, cex = 0.7,
-       main = i, xlab = "depth", ylab = "", type = "o")
-  abline(v=2.9, col="red")
-  abline(v=6.7, col="red")
-}
-dev.off()
-
-# Clustering of variables
-pdf(file="POP_elem_cluster.pdf")
-plot(hclust(dist(cor(na.omit(POP_elem[1:21,c(2,4:9,15:32)])))),
-     xlab = "")
-dev.off()
-
-# # PCA of these variables
-# POP_elem_PCA = rda(na.omit(POP_elem[1:21,c(3:8,14:31)]))
-# 
-# # PC correlations with variables
-# corrplot(cor(data.frame(POP_elem_PCA$CA$u[,1:4],
-#                         na.omit(POP_elem[1:21,c(3:8,14:31)])),
-#              method = "spearman"),
-#          diag = F,
-#          order = "hclust", hclust.method = "average")
-
-# Centering and co-plotting of pesticides, metals and OTUs
-
-##### Pesticide, elements and eDNA visualizations
-# depths corresponding the samples
-depths = read.csv(file="depths.csv", header=T)
-
-# Transposed species abundance matrix
-SamCountsT = t(SamCounts)
-
-# Z-scores of counts
-SamZ = scale(OTU.some, center = T, scale = T)
-
-# Center the POP and element data to get z-scores
-PE_scaled = cbind(POP_elem[,1:2], 
-                  scale(POP_elem[,c(4:7, 15:length(names(POP_elem)))], 
-                        center = T, scale = T))
-
-# Plot together with elements and POPs
-par(mfrow = c(1,3))
-# POP
-par(mar = c(2,3,2,0))
-plot(seq(min(PE_scaled[,3:7], na.rm=T), 
-         max(PE_scaled[,3:7], na.rm=T), 
-         (max(PE_scaled[,3:7], na.rm=T) - 
-            min(PE_scaled[,3:7], na.rm=T))/(nrow(PE_scaled)-1)),
-     PE_scaled$depth, 
-     type = "n", cex.axis = 1.3,
-     ylim = rev(range(PE_scaled$depth)),
-     main = "Pesticides", xlab = "Depth (cm)")
-for (i in names(PE_scaled[3:7])){
-  points(PE_scaled[,i], PE_scaled$depth, 
-         type = "l", col = sample(90:99), lwd=2)
-}
-
-# Elements
-par(mar = c(2,1,2,1))
-plot(seq(min(PE_scaled[,8:ncol(PE_scaled)], na.rm=T), 
-         max(PE_scaled[,8:ncol(PE_scaled)], na.rm=T), 
-         (max(PE_scaled[,8:ncol(PE_scaled)], na.rm=T) - 
-            min(PE_scaled[,8:ncol(PE_scaled)], na.rm=T))/(nrow(PE_scaled)-1)), 
-     PE_scaled$depth, 
-     type = "n", yaxt = "n", cex.axis = 1.3,
-     ylim = rev(range(PE_scaled$depth)),
-     main = "Metals", xlab = "Depth (cm)")
-for (i in names(PE_scaled[8:ncol(PE_scaled)])){
-  points(PE_scaled[,i], PE_scaled$depth, 
-         type = "l", col = sample(150:159), lwd=2)
-}
-
-# Taxa
-par(mar = c(2,0,2,3))
-plot(seq(min(SamZ, na.rm=T), # keeping PE_scaled$depth: to use the same depth range 
-         max(SamZ, na.rm=T), 
-         (max(SamZ, na.rm=T) - 
-            min(SamZ, na.rm=T))/(nrow(PE_scaled)-1)), 
-     PE_scaled$depth,
-     ylim = rev(range(PE_scaled$depth)),
-     type = "n", yaxt = "n", cex.axis = 1.3,
-     main = "Taxa", xlab = "Depth (cm)")
-for (i in names(as.data.frame(SamZ))) {
-  points(as.data.frame(SamZ)[,i], depths$depth, type = "p", 
-         cex=0.8, col = sample(20:29), lwd=2)
-}
-axis(4, at = pretty(PE_scaled$depth, 5), 
-     labels = pretty(rev(PE_scaled$depth), 5), 
-     cex.axis = 1.3)
-
-# corrplot(cor(cbind(depth = depths$depth, SamCountsT), method="spearman"),
-         # tl.cex = 0.5, tl.col = "black")
-
-# Plot the technical replicates: they should go together.
-# LVM for replicate outliers
-
-# OTU abundance matrix
-RepliMatrix = EmblHead[,grep('sample.', names(EmblHead))]
-RepliMatrix = RepliMatrix[,1:96]
-# Remove OTUs with no observations
-RepliMatrix = RepliMatrix[apply(RepliMatrix,1,sum) > 0, ]
-summary(apply(RepliMatrix, 1,sum))
-
-# Explanatory variables
-RepliExp = ExpSet[1:96,]
-
-# Estimate overdispersion parameters
-
-# mvabund input matrix
-Repli.mvabund = mvabund(t(RepliMatrix))
-
-# simple model, similar to the LVM ordination
-theta.model = manyglm(Repli.mvabund ~ reads, data = RepliExp,
-                      family = "negative.binomial")
-
-# diagnostics
-plot(theta.model, which = c(1:3))
-
-# distribution of the overdispersion parameters
-hist(theta.model$theta)
-hist(log(theta.model$theta)) # a few OTUs have weird dispersion parameters
-
-# OTUs with weird overdispersion
-rownames(RepliMatrix[theta.model$theta > 30,])
-
-# LVM model
-# Set overdispersion prior
-set.prior = list(type = c("normal","normal","normal","uniform"),
-                 hypparams = c(100, 20, 100, 20))
-
-# LVM ordination on OTUs with relatively low overdispersion
-comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
-                 family = "negative.binomial", 
-                 prior.control = set.prior, num.lv = 2, n.burnin = 10, 
-                 n.iteration = 100, n.thin = 1)
-
-# Colors and symbols for samples
-RepliExp = data.frame(RepliExp, 
-                      symbols = c(c(rep(22,4), rep(23,2), 
-                                    rep(24,4), rep(25,2)),
-                                  na.omit(RepliExp$depth.nominal)))
-
-plot(c(1:96), c(1:96), lwd=2, 
-     col=RepliExp$symbols*10, pch = RepliExp$symbols)
-sample_colors = c(levels(factor(RepliExp$symbols*10)))
-sample_legend = c(levels(factor(RepliExp$depth)), c("Extraction control",
-                                                    "Multiplex control",
-                                                    "PCR control",
-                                                    "Mock community"))
-# depth_names = unique(factor(ExpPredictor$depth))
-pdf(file = "LVM_technical_replicates.pdf", width = 10)
-par(mfrow = c(1,1), mar = c(4,4,1,1))
-ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
-                    display = "sites")
-points(ordicomm,"sites", lwd=2, 
-       col=RepliExp$symbols*10, pch = RepliExp$symbols)
-# color by person
-# points(ordicomm,"sites", lwd=2, 
-#        col=as.numeric(RepliExp$person)*100, pch = RepliExp$symbols)
-ordispider(ordicomm, RepliExp$symbols, 
-           col=sample_colors, lwd = 2)
-ordisurf(ordicomm, RepliExp$depth, add=T, col = "grey")
-legend(-1.8, 0.8, sample_legend, border="white", bty="n", lwd = 2,
-       col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.9)
-# legend for person
-# legend(-1.8, 0, levels(RepliExp$person), 
-#        border="white", bty="n", lwd = 2,
-#        col=as.numeric(as.factor(levels(RepliExp$person)))*100, 
-#        pch = 19, cex = 0.9)
-legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/control, contours - depth", 
-       border="white", bty="n", cex = 0.9)
-# text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
-dev.off()
-
-# plot for technical replicate explanation
-
-ExplainColors = RepliExp$symbols
-ExplainColors[ExplainColors != 10] <- 0
-
-ExplainSampleColors = c(levels(factor(RepliExp$symbols*10)))
-ExplainSampleColors[ExplainSampleColors != 100] <- 0
-
-par(mfrow = c(1,1), mar = c(4,4,1,1))
-ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), type = "none", cex =0.5,
-                    display = "sites")
-points(ordicomm, "sites", lwd=2, 
-       col=ExplainColors*10, pch = RepliExp$symbols)
-# color by person
-# points(ordicomm,"sites", lwd=2, 
-#        col=as.numeric(RepliExp$person)*100, pch = RepliExp$symbols)
-ordispider(ordicomm$sites, RepliExp$symbols, 
-           col=ExplainSampleColors, lwd = 2)
-ordisurf(ordicomm, RepliExp$depth, add=T, col = "grey")
-legend(-1.8, 0.8, sample_legend, border="white", bty="n", lwd = 2,
-       col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.9)
-# legend for person
-# legend(-1.8, 0, levels(RepliExp$person), 
-#        border="white", bty="n", lwd = 2,
-#        col=as.numeric(as.factor(levels(RepliExp$person)))*100, 
-#        pch = 19, cex = 0.9)
-legend(-1.1, 1.15, "colors - samples/controls, symbols - replicates of sample/control, contours - depth", 
-       border="white", bty="n", cex = 0.9)
-# text(ordicomm,"sites",rownames(RepliExp), cex=0.5)
-
-# The mock communities seem to be pulling the weird replicates.
-# What are they?
-levels(factor(EmblHead$family_name[apply(EmblHead[,grep("sample.POS", names(EmblHead))],1,sum) > 0]))
-
-
-# Average and sum the OK replicates
-# Technical replicate problems, visually from the LVM plot
-# Most of these are from the first extraction replicate.
-# 6 / 8 are done by Orsi
-# # At least these
-# ST01−10−rep−1−MN_S1,
-# ST01−7−5−rep−1−MB_S90
-# ST01−9−rep−1−MB_S14
-# # More strictly these too
-# ST01−5−5−rep−1−MN_S27
-# ST01−3−5−rep−1−MB_S12
-# ST01−5−5−rep−1−MB_S66
-# ST01−3−rep−1−MB_S40
-# ST01−2−rep−1−MB_S62
-# ST01−1−rep−2−MN_S51
-# ST01−8−5−rep−1−MB_S76
-
-RepliProblems = c("ST01.10.rep.1.MN_S1",
-                  "ST01.7.5.rep.1.MB_S90",
-                  "ST01.9.rep.1.MB_S14",
-                  "ST01.5.5.rep.1.MN_S27",
-                  "ST01.3.5.rep.1.MB_S12",
-                  "ST01.5.5.rep.1.MB_S66",
-                  "ST01.3.rep.1.MB_S40",
-                  "ST01.2.rep.1.MB_S62",
-                  "ST01.1.rep.2.MN_S51",
-                  "ST01.8.5.rep.1.MB_S76")
-
-# Sample matrix with replicates
-# Only the abundances in the "samples" are in here, so no head etc. information
-SampleMatrix = EmblControlled[,grep('sample.', names(EmblControlled))]
-SampleMatrix = SampleMatrix[,1:96]
-
-# Abundance matrix without the problem replicates
-ControlMatrix = SampleMatrix[,grep(paste(rep("sample.",10), 
-                                         RepliProblems, sep = "", 
-                                         collapse = "|"), 
-                                   names(SampleMatrix), invert=T)]
-
-# Abundance matrix without the controls
-ControlMatrix = ControlMatrix[,grep("sample.ST", names(ControlMatrix))]
-
-# combine the replicates of samples
-# get sample names, code from here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
-SampleNames = levels(as.factor(sapply(strsplit(names(ControlMatrix),
-                                               split='rep', fixed=TRUE),
-                                      function(x) (x[1]))))
-
-## NOT DONE - Remove the OTUs observed in less, than 2 replicates here
-# In how many replicates observed per sample?
-PresentReps = data.frame(row.names = rownames(AbundControlled))
-for (i in 1:length(SampleNames)){
-  ActualSet = grep(SampleNames[i], names(AbundControlled))
-  Selected = AbundControlled[ActualSet]
-  Selected[Selected > 0] <- 1 # set the read numbers to 1
-  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
-}
-colnames(PresentReps) = SampleNames
-
-# Set read numbers to 0 in a sample if the sequence variant was not observed in at least
-# two PCR replicates
-SummedControlled = SummedReps
-SummedControlled[PresentReps < 2] <- 0
-
-# Average the replicates for each sample
-AveragedReps = data.frame(row.names = rownames(ControlMatrix))
-for (i in 1:length(SampleNames)){
-  ActualSet = grep(SampleNames[i], names(ControlMatrix)) # grep the columns of interest
-  AveragedReps = cbind(AveragedReps, apply(ControlMatrix[ActualSet], 1, mean))
-}
-colnames(AveragedReps) = SampleNames
-# write.csv(file="test.csv", AbundControlled)
-
-# Multiply by 4 do get read numbers of four technical replicates
-# and round the floats
-SummedMatrix = round(AveragedReps*4)
-
-# Remove zero-count OTUs
-SummedMatrix = SummedMatrix[apply(SummedMatrix,1,sum) > 0,]
-# sum(SummedMatrix)
-# [1] 530604
-
-# rename SummedMatrix column names
-names(SummedMatrix) <- gsub("sample.ST01.","ST01_",names(SummedMatrix))
-
-# Summarize all predictors for the 21 horizons
-# 0. keep only relevant POP_elem entries
-POP_short = POP_elem[1:21,]
-
-# 1. ordering the POP_short names will give the same order 
-# that matches names SummedMatrix.
-POP_shortReord = POP_short[order(rownames(POP_short)),]
-
-# 2. the "depth" from the POP_elem will re-sort the order in SummedMatrix
-names(SummedMatrix)[order(POP_shortReord$depth)]
-SummedMatrixReord = SummedMatrix[,order(POP_shortReord$depth)]
-
-# 3. the RepliExp replicates need to be summarized
-# This is still ugly.
-RepliProblems2 = c("ST01-10-rep-1-MN_S1",
-                   "ST01-7-5-rep-1-MB_S90",
-                   "ST01-9-rep-1-MB_S14",
-                   "ST01-5-5-rep-1-MN_S27",
-                   "ST01-3-5-rep-1-MB_S12",
-                   "ST01-5-5-rep-1-MB_S66",
-                   "ST01-3-rep-1-MB_S40",
-                   "ST01-2-rep-1-MB_S62",
-                   "ST01-1-rep-2-MN_S51",
-                   "ST01-8-5-rep-1-MB_S76")
-
-# remove the controls
-ToSumExp = RepliExp[13:96,]
-
-# remove problematic replicates
-ToSumExp = ToSumExp[grep(paste(RepliProblems2, 
-                               collapse = "|"), 
-                         rownames(ToSumExp), invert=T),]
-
-# write out what needs to be combined
-write.csv(file = "sum_explanatories.csv", ToSumExp)
-
-# read in combined explanatories
-SummedExp = read.csv(file = "averaged_explanatories.csv", header = T,
-                     row.names = 1)
-
-# Correct rownames
-rownames(SummedExp) = as.factor(sapply(strsplit(rownames(SummedExp),
-                                                split='-rep', fixed=TRUE),
-                                       function(x) (x[1])))
-
-# Multiply by 4 to get original (or estimated) read numbers 
-# from all replicates
-SummedExp$conc <- SummedExp$conc*4
-SummedExp$reads <- SummedExp$reads*4
-
-# # Sample names for experimental variables
-# SampleNamesExp = levels(as.factor(sapply(strsplit(rownames(ToSumExp),
-#                                                split='-rep', fixed=TRUE),
-#                                       function(x) (x[1]))))
-# 
-# # Create the dataframe
-# SummedExp = data.frame(row.names = SampleNamesExp)
-# 
-# # averaged reads
-# for (i in 1:length(SummedExp)){
-#   ActualSet = grep(SampleNamesExp[i], rownames(ToSumExp), fixed=T) # grep the columns of interest
-#   AveragedReps = cbind(SummedExp, reads = apply(ToSumExp[ActualSet], 1, mean))
-# }
-# colnames(AveragedReps) = SampleNames
-# grep(SampleNamesExp[3], rownames(ToSumExp), fixed=T)
-
-# 4. Reorder Explanatory matrix
-SummedExpReord = SummedExp[order(SummedExp$depth),]
-
-# 4. Are all entries in all dataframes ordered the same way?
-data.frame(POP = rownames(POP_short),
-           Exp = rownames(SummedExpReord),
-           OTU = rownames(t(SummedMatrixReord)))
-
-# 5. correlation structures in POP_short
-# pdf(file="POP_elem_correlations.pdf")
-corrplot(cor(na.omit(POP_short[,c(2:8,14:31)]), 
-             method = "pearson"),
-         diag = F, 
-         order = "hclust", hclust.method = "average")
-# dev.off()
-
-# Most POPs and metals are correlated. 
-# DDT has very few data, I leave it out.
-# relatively not correlated with others: TF, Mo, Na, 
-# but they are hard to interpret
-# Finally, I will use depth alone as substitute for all others
-
-# NOT DONE: I will use the POP/metal with the highest correlation coefficient
-# for the autocorrelated group
-
-# Are they correctly selected? 
-corrplot(cor(na.omit(POP_short[,c(3:6,15:27,30:31)]),
-             method = "pearson"),
-         diag = F, 
-         order = "hclust", hclust.method = "average")
-
-# cumulative correlation coefficients
-cor_POP_elem = cor(na.omit(POP_short[,c(2:6,15:27,30:31)]), 
-                   method = "spearman")
-
-# substract the diagonal and divide into two 
-# because each value is doubled
-max((apply(abs(cor_POP_elem),1,sum)-1)/2) # As has the highest cum cor coef
-
-# OTUs in at least two horizons
-TotPresent = apply(t(SummedMatrixReord),2,function(vec) sum(vec>0))
-OTU.some = SummedMatrixReord[TotPresent > 2,]
-OTU.some = as.data.frame(t(OTU.some))
-
-# Models of community composition
-OTUSummed.mva = mvabund(OTU.some)
-
-# full model. TF is weird. Mo and Na is hard to interpret. 
-OTU.m1 = manyglm(OTUSummed.mva ~ 
-                   SummedExpReord$reads +
-                   SummedExpReord$person +
-                   SummedExpReord$depth,
-                 family = "negative.binomial")
-
-# diagnostic plot
-plot(OTU.m1, which = c(1:3))
-
-# Variation partitioning
-anova.OTU.m1 = anova(OTU.m1, nBoot = 100, p.uni = "adjusted")
-
-# With AKW times
-# Add AKW operation to variables
-POP_short = data.frame(POP_short, 
-                       akw = c(rep("post",4), c(rep("akw",10)), c(rep("pre",7))))
-
-POP_short = data.frame(POP_short, 
-                       akw2 = c(rep("NoAkw",4), c(rep("Akw",10)), c(rep("NoAkw",7))))
-
-OTU.m3 = manyglm(OTUSummed.mva ~ depth + akw,
-                 data=POP_short,
-                 family = "negative.binomial")
-
-OTU.m4 = manyglm(OTUSummed.mva ~ depth + akw2,
-                 data=POP_short,
-                 family = "negative.binomial")
-
-OTU.m3$AICsum
-OTU.m4$AICsum
-
-OTU.m5 = manyglm(OTUSummed.mva ~ depth*akw,
-                 data=POP_short,
-                 family = "negative.binomial")
-
-OTU.m5$AICsum
-
-anova.OTU.m5 = anova(OTU.m5, nBoot = 50)
-
-# How OTUs change?
-# OTUs stat. significantly explained by depth
-p.ind.anova <- as.data.frame(anova.OTU.m1$uni.p)
-colnames(p.ind.anova)[p.ind.anova[4,]<=0.5]
-
-# OTUs with abs(coef) - abs(stderr) > 0 (reliable abundance change)
-# Depth
-StrongCoefDepth = abs(OTU.m1$coefficients["SummedExpReord$depth",]) - 
-  abs(OTU.m1$stderr.coefficients["SummedExpReord$depth",]) > 0
-
-NamesDepth = names(StrongCoefDepth[StrongCoefDepth == T])
-
-# plot(fitted(OTU.m1)[,"M01271.3.000000000.D0YHF.1.1101.19713.24293_CONS_SUB"],
-#      SummedExpReord$depth)
-plot(OTU.some$`M01271:3:000000000-D0YHF:1:1101:13412:13277_CONS_SUB`,
-    SummedExpReord$depth)
-
-# LVM of horizons
-# simple model, similar to the LVM ordination
-OTU.m0 = manyglm(OTUSummed.mva ~ 
-                   SummedExpReord$reads,
-                 family = "negative.binomial")
-
-# diagnostics
-plot(OTU.m0, which = c(1:3))
-
-# distribution of the overdispersion parameters
-hist(OTU.m0$theta)
-hist(log(OTU.m0$theta)) # a few OTUs have weird dispersion parameters
-
-# OTUs with weird overdispersion
-names(OTU.some[,OTU.m0$theta > 30])
-
-# LVM model
-# Set overdispersion prior
-set.prior = list(type = c("normal","normal","normal","uniform"),
-                 hypparams = c(100, 20, 100, 20))
-
-# LVM ordination of horizons
-horizon.comm.ord = boral(OTU.some[,OTU.m0$theta < 30],
-                         X = SummedExpReord$reads,
-                         family = "negative.binomial", 
-                         prior.control = set.prior, num.lv = 2, n.burnin = 10, 
-                         n.iteration = 100, n.thin = 1)
-
-# gradient colors
-colorfunk = colorRampPalette(c("green", "brown"))
-
-# try colors
-plot(c(1:21), c(1:21), lwd=3, 
-     col=colorfunk(21), pch = SummedExpReord$depth_nominal+1)
-
-
-
-# depth_names = unique(factor(ExpPredictor$depth))
-# pdf(file = "LVM_technical_replicates.pdf", width = 10)
-par(mfrow = c(1,1), mar = c(4,4.5,1,1))
-hor.ordicomm = ordiplot(horizon.comm.ord$lv.median, choices = c(1,2), type = "none",
-                    display = "sites",
-                    cex.axis = 1.3, cex.lab = 1.3)
-points(hor.ordicomm,"sites", lwd=4, 
-       col=colorfunk(21), 
-       pch = SummedExpReord$depth_nominal+1,
-       cex = 1.5)
-legend(-0.05, 0.08, SummedExpReord$depth, border="white", 
-       col=colorfunk(21), 
-       pch = SummedExpReord$depth_nominal+1, 
-       cex = 1, bty="n", lwd = 2, ncol = 2)
-ordisurf(hor.ordicomm, POP_short$DDE4.4, 
-         add=T, col = "red", lwd = 1.5, cex = 1.3)
-ordisurf(hor.ordicomm, POP_short$depth, 
-         add=T, col = "black", lwd = 1.5, cex = 1.3)
-# ordisurf(hor.ordicomm, POP_short$As.193.696, 
-#          add=T, col = "green", lwd = 2, cex = 1.3)
-# ordisurf(hor.ordicomm, POP_short$Pb.217.000, 
-#          add=T, col = "yellow", lwd = 2, cex = 1.3)
-# ordisurf(hor.ordicomm, POP_short$Ca.220.861, 
-#          add=T, col = "blue", lwd = 2, cex = 1.3)
-# ordisurf(hor.ordicomm, POP_short$Mo.201.512, 
-#          add=T, col = "green", lwd = 2, cex = 1.3)
-# dev.off()
-
-# SOM2: species modelled separately - for species-specific methodological differences
-# Detection probabilities for each species per method
-SOM2.p = read.csv(file = "SOM/SOM2_detection_prob.csv", row.names = 1, header=T)
-
-# False positives, each species per method
-SOM2.fp = SOM2.p = read.csv(file = "SOM/SOM2_false_pos.csv", row.names = 1, header=T)
-
-# Coefficient plots
-par(mfrow=c(1,3), mar=c(4.1,1,0.5,0.5))
-plot(rep(0,nrow(SOM2.p)), c(nrow(SOM2.p):1), type="n", 
-     bty="n", xaxt="n", yaxt="n", xlab="", ylab="")
-plot(SOM2.p[,"pA_estimate"], c(nrow(SOM2.p):1)-0.2, 
-     xlim=c(0,0.5), yaxt="n",
-     xlab="Detection probability", ylab="", pch=19, cex=0.5, 
-     ylim=c(nrow(SOM2.p),1))
-points(SOM2.p[,"pB_estimate"], c(nrow(SOM2.p):1), pch=17, cex=0.5)
-points(SOM2.p[,"pC_estimate"], c(nrow(SOM2.p):1)+0.2, pch=15, cex=0.5)
-segments(SOM2.p$pA_2.5..CI, c(nrow(SOM2.p):1)-0.2, 
-         SOM2.p$pA_97.5..CI, c(nrow(SOM2.p):1)-0.2)
-segments(SOM2.p$pB_2.5..CI, c(nrow(SOM2.p):1), 
-         SOM2.p$pB_97.5..CI, c(nrow(SOM2.p):1))
-segments(SOM2.p$pC_2.5..CI, c(nrow(SOM2.p):1)+0.2, 
-         SOM2.p$pC_97.5..CI, c(nrow(SOM2.p):1)+0.2)
-for(i in 1:nrow(SOM2.p)){
-  lines(c(-0,1), c(i,i)-0.5, lty="dotted")
-}
-axis(2, at=c(nrow(SOM2.p):1), label=rownames(SOM2.p), las=1, cex.axis=0.9,
-     tick=F)
-plot(SOM2.fp[,"pA_estimate"], c(nrow(SOM2.p):1)-0.2, 
-     xlim=c(0,0.5), yaxt="n",
-     xlab="False positives", ylab="", pch=19, cex=0.5, 
-     ylim=c(nrow(SOM2.p),1))
-points(SOM2.fp[,"pB_estimate"], c(nrow(SOM2.fp):1), pch=17, cex=0.5)
-points(SOM2.fp[,"pC_estimate"], c(nrow(SOM2.fp):1)+0.2, pch=15, cex=0.5)
-segments(SOM2.fp$pA_2.5..CI, c(nrow(SOM2.fp):1)-0.2, 
-         SOM2.fp$pA_97.5..CI, c(nrow(SOM2.fp):1)-0.2)
-segments(SOM2.fp$pB_2.5..CI, c(nrow(SOM2.fp):1), 
-         SOM2.fp$pB_97.5..CI, c(nrow(SOM2.fp):1))
-segments(SOM2.fp$pC_2.5..CI, c(nrow(SOM2.fp):1)+0.2, 
-         SOM2.fp$pC_97.5..CI, c(nrow(SOM2.fp):1)+0.2)
-for(i in 1:nrow(SOM2.p)){
-  lines(c(-0,1), c(i,i)-0.5, lty="dotted")
-}
-
-
