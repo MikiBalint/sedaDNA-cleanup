@@ -1,7 +1,6 @@
 ---
 title: "Lab randomization of samples is important"
 author: "Miki Bálint"
-date: "`r format(Sys.time(), '%d %B, %Y')`"
 ---
 
 ``` {r include = FALSE}
@@ -30,12 +29,13 @@ EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
                       header=T, sep='|', row.names = 1)
 
 # Read POP and elements data
-POP_elem = read.csv(file = "../../../Data/Stechlin_pre-analysis/stechlin_pop_elements.csv", 
+POP_elem = read.csv(file = "../../Data/stechlin_pop_elements.csv", 
                     header = T, row.names = 1)
 
 # Read experimental setup data
-ExpSet = read.csv(file = "../../../Data/Stechlin_pre-analysis/sample_infos.csv",
+ExpSet = read.csv(file = "../../Data/sample_infos.csv",
                   header = T, row.names = 1)
+RepliExp = ExpSet[1:96,]
 ```
 
 How many reads are there?
@@ -78,13 +78,11 @@ of reads of each sample.
 # mvabund input matrix
 Repli.mvabund = mvabund(t(RepliMatrix))
 
-# Explanatory variables
-RepliExp = ExpSet[1:96,]
-
 # simple model, similar to the LVM ordination
 theta.model = manyglm(Repli.mvabund ~ reads, data = RepliExp,
                       family = "negative.binomial")
 ```
+
 ```{r include=FALSE, eval=FALSE}
 # diagnostics
 plot(theta.model, which = c(1:3))
@@ -95,7 +93,7 @@ A few OTUs have weird dispersion parameters.
 # distribution of the overdispersion parameters
 hist(theta.model$theta)
 hist(log(theta.model$theta)) 
-rownames(RepliMatrix[theta.model$theta > 30,])
+# rownames(RepliMatrix[theta.model$theta > 30,])
 ```
 
 Model-based ordination with `boral`. 
@@ -334,9 +332,389 @@ How many reads after removing rare observations?
 sum(RareControlled[,IndexSample])
 ```
 
-## Effects of possible laboratory biases
-Lab worker, extraction order, PCR order effects on diversity and 
-composition come here.
+
+## Effects of laboratory biases
+
+Lab worker, extraction order, PCR order effects on diversity and composition.
+
+```{r}
+# Predictors of lab effects
+ExpLab = RepliExp[13:96,]
+```
+
+OTU abundance matrix
+```{r}
+# OTUs from samples for lab effects
+OTULab = RareControlled[,IndexSample]
+OTULab = data.frame(t(OTULab[,13:96]))
+```
+
+In low read samples only read numbers may drive OTU observations. Since samples were not multiplexed before PCR we assume that read numbers stand for PCR performance.
+```{r}
+plot(specnumber(OTULab) ~ ExpLab$reads, 
+     main = "Richness VS read numbers",
+     xlab = "No. reads", ylab = "Richness",
+     pch=19)
+```
+
+In samples with less than 3000 reads only the PCR efficiency drives richness. I remove those samples.
+
+```{r}
+FilterSample = ExpLab$reads >= 3000
+
+# Remove samples with less, than 3000 reads
+OTULab = OTULab[FilterSample,]
+
+# remove OTUs with no reads left
+OTULab = OTULab[,apply(OTULab,2,sum)>0]
+```
+
+Adjust the lab predictors
+```{r}
+FilterLab = rownames(ExpLab) %in% rownames(OTULab)
+ExpLab = ExpLab[FilterLab,]
+```
+
+### Measures of diversity: Hill's numbers
+Richness and diversity
+```{r}
+HillLab = renyi(OTULab, scale = c(0,1,2), hill = T)
+names(HillLab) = c("hill1", "hill2", "hill3")
+```
+
+### Explore some relationships.
+Richness VS read numbers
+```{r}
+plot(HillLab$hill1 ~ ExpLab$reads, 
+     main = "Richness VS read numbers",
+     xlab = "No. reads", ylab = "Richness",
+     pch=19)
+```
+
+Richness by lab person
+```{r}
+boxplot(HillLab$hill1 ~ ExpLab$person,
+        main = "Richness by lab person",
+        xlab = "Person",
+        ylab = "Richness")
+```
+
+DNA concentration by lab person
+```{r}
+boxplot(ExpLab$conc ~ ExpLab$person,
+        main = "DNA concentration by lab person",
+        xlab = "Person",
+        ylab = "DNA concentration (ng/ul)")
+```
+
+Richness by DNA concentration
+```{r}
+plot(HillLab$hill1 ~ ExpLab$conc, 
+     main = "Richness by DNA concentration",
+     xlab = "DNA concentration (ng/ul)", ylab = "Richness",
+     pch=19)
+```
+
+Richness by extraction order
+```{r}
+plot(HillLab$hill1 ~ ExpLab$extract_order, 
+     main = "Richness by extraction order",
+     xlab = "Extraction order", ylab = "Richness",
+     pch=19)
+```
+
+Depth by extraction order
+```{r}
+plot(ExpLab$depth ~ ExpLab$extract_order, 
+     main = "Depth by extraction order",
+     xlab = "Extraction order", ylab = "Depth (cm)",
+     pch=19)
+```
+
+DNA concentration by extraction order
+```{r}
+plot(ExpLab$conc ~ ExpLab$extract_order, 
+     main = "DNA concentration by extraction order",
+     xlab = "Extraction order", ylab = "DNA concentratio (ng/ul)",
+     pch=19)
+```
+
+DNA concentration by kit (MB: MoBio, MN: Macherey-Nagel)
+```{r}
+plot(ExpLab$conc ~ ExpLab$kit, 
+     main = "DNA concentration by kit",
+     xlab = "Kit", ylab = "DNA concentration (ng/ul)",
+     pch=19)
+```
+
+Richness by kit (MB: MoBio, MN: Macherey-Nagel)
+```{r}
+plot(HillLab$hill1 ~ ExpLab$kit, 
+     main = "Richness by kit",
+     xlab = "Kit", ylab = "Richness",
+     pch=19)
+```
+
+Number of reads by PCR order
+```{r}
+plot(ExpLab$reads ~ ExpLab$pcr_order, 
+     main = "Number of reads by PCR order",
+     xlab = "PCR order", ylab = "Richness",
+     pch=19)
+```
+
+DNA concentration by sample weight
+```{r}
+plot(ExpLab$conc ~ ExpLab$weight, 
+     main = "DNA concentration by sample weight",
+     xlab = "Sample weight (g)", ylab = "DNA concentration (ng/ul)",
+     pch=19)
+```
+
+### DNA concentration
+
+#### Hypothesis: sample weight, extracting person, extraction order, extraction kit all influence DNA concentration
+
+Fit the full model
+```{r}
+conc.weight.kit.personXorder = 
+  lm(conc ~ weight + kit + person*extract_order,
+     data = ExpLab)
+summary(conc.weight.kit.personXorder)
+```
+
+Simpler model without the person
+```{r}
+conc.weight.kit.order = 
+  lm(conc ~ weight + kit + extract_order,
+     data = ExpLab)
+
+# The more complicated model is not better
+AIC(conc.weight.kit.order)
+AIC(conc.weight.kit.personXorder)
+anova(conc.weight.kit.order, conc.weight.kit.personXorder)
+```
+
+Coefficients and , confidence intervals and statistical significances of the selected model
+```{r}
+cbind(coef = coef(conc.weight.kit.order), 
+      confint(conc.weight.kit.order))
+
+summary(conc.weight.kit.order)
+```
+
+Alternative model: it is the person and not the order what better explains the concentration differences
+```{r}
+conc.weight.kit.person = 
+  lm(conc ~ weight + kit + person,
+     data = ExpLab)
+
+AIC(conc.weight.kit.order)
+AIC(conc.weight.kit.person)
+```
+
+Include the depth as predictor with biological interest
+```{r}
+conc.weight.kit.order.depth = 
+  lm(conc ~ weight + kit + extract_order + depth,
+     data = ExpLab)
+
+sum.conc = summary(conc.weight.kit.order.depth)
+summary(aov(conc.weight.kit.order.depth))
+```
+
+Plot the effects. For some reason it does not get into the output, so I read it in for now
+```{r include = FALSE}
+plot(allEffects(conc.weight.kit.order.depth, 
+                multiline=TRUE, 
+                confidence.level = 0.95))
+```
+![](conc_effect.png)
+
+```{r}
+cbind(sum.conc$coefficients,
+      confint(conc.weight.kit.order.depth))
+```
+
+#### Concentration interpretation
+DNA concentration is decreasing with depth - this is expected since extracellular DNA should be degraded with age.
+
+The extraction order explains almost as much variation in DNA concentration as the depth.
+
+### Read numbers
+The concentration of the PCR templates was not normalized before multiplexing, so the read numbers may be considered as a measure of PCR efficiency.
+
+#### Hypothesis: read numbers are influenced by the DNA concentration, extraction kit, extracting person, extraction order.
+
+Fit the full model.
+```{r}
+read.conc.kit.person.order = 
+  lm(reads ~ conc + kit + extract_order + person,
+     data = ExpLab)
+
+summary(read.conc.kit.person.order)
+```
+
+Fit simpler model without the order
+```{r}
+read.conc.kit.person = 
+  lm(reads ~ conc + kit + person,
+     data = ExpLab)
+
+summary(read.conc.kit.person)
+```
+
+The complex model is not better.
+```{r}
+anova(read.conc.kit.person.order,
+      read.conc.kit.person)
+```
+
+The depth of the horizons does not inflence the PCR efficiency.
+```{r}
+read.conc.kit.person.depth = 
+  lm(reads ~ conc + kit + person + depth,
+     data = ExpLab)
+
+summary(read.conc.kit.person.depth)
+summary(aov(read.conc.kit.person.depth))
+```
+
+Plot the effects. Insert plot.
+```{r include=FALSE}
+plot(allEffects(read.conc.kit.person.depth,
+                multiline=TRUE, 
+                confidence.level = 0.95))
+```
+![](read_effect.png)
+
+It may sound trivial that the person who performs PCRs may have a strong inlfunce on the success of these. By far most explained variation in PCR efficiency was explained by the identity of the lab personnel (the only stat. significant predictor).
+
+### Richness
+#### Hypothesis: read numbers, DNA concentration, extraction kit, extracting person, extraction order explain the richness.
+
+The full model:
+```{r}
+rich.read.conc.kit.person.order = 
+  lm(HillLab$hill1 ~ reads + conc + 
+       kit + person + extract_order,
+     data = ExpLab)
+
+summary(rich.read.conc.kit.person.order)
+```
+
+Simpler model with no kit
+```{r}
+rich.read.conc.person.order = 
+  lm(HillLab$hill1 ~ reads + conc + 
+       person + extract_order,
+     data = ExpLab)
+
+summary(rich.read.conc.person.order)
+
+# the more complex model is not better
+anova(rich.read.conc.person.order, rich.read.conc.kit.person.order)
+```
+
+How do the laboratory factors compare to biologically interesting predictors? Here simply the depth of the samples is used since there might be a change in richness over time.
+```{r}
+rich.read.conc.person.order.depth = 
+  lm(HillLab$hill1 ~ reads + conc + 
+       person + extract_order + depth,
+     data = ExpLab)
+
+# including the depth as predictor considerably improves the model
+anova(rich.read.conc.person.order, rich.read.conc.person.order.depth)
+```
+
+Effect, errors, statistical significance, and variation exmplained by the predictors
+```{r}
+summary.rich = summary(rich.read.conc.person.order.depth)
+
+# Variation partitioning
+aov.rich = summary(aov(rich.read.conc.person.order.depth))
+```
+
+Plot the effects.
+```{r include = FALSE}
+plot(allEffects(rich.read.conc.person.order.depth,
+                multiline=TRUE, 
+                confidence.level = 0.95))
+```
+![](rich_effects.png)
+
+Summary of the richness model
+```{r}
+cbind(summary.rich$coefficients,
+      confint = confint(rich.read.conc.person.order.depth))
+```
+
+#### Conclusions richness
+Most variance in richness is explained by the sequencing depth (read numbers). The concentration of the sample was not normalized before multiplexing, so in our case the read numbers may be considered as a measure of PCR efficiency.
+
+The lab person identity and the order of extraction together explained almost as much variation in the richness as the depth, which was considered here as the predictor with biological interest.
+
+### Hill's 2 (exp(Shannon diversity))
+#### Hypothesis: Hill's 2 is explained by read numbers, DNA concentration, extraction kit, extracting person, extraction order.
+
+The full model. All predictors seem statistically significant.
+```{r}
+hill2.read.conc.kit.person.order = 
+  lm(HillLab$hill2 ~ reads + conc + 
+       kit + person + extract_order,
+     data = ExpLab)
+
+summary(hill2.read.conc.kit.person.order)
+```
+
+Adding up the depth. Model fit improves, kit doesn't seem important anymore.
+```{r}
+hill2.read.conc.kit.person.order.depth = 
+  lm(HillLab$hill2 ~ reads + conc + 
+       kit + person + extract_order + depth,
+     data = ExpLab)
+
+summary(hill2.read.conc.kit.person.order.depth)
+```
+
+Simpler depth model, no kit. All other predictors seem statistically significant.
+```{r}
+hill2.read.conc.person.order.depth = 
+  lm(HillLab$hill2 ~ reads + conc + 
+       person + extract_order + depth,
+     data = ExpLab)
+
+sum.hill2 = summary(hill2.read.conc.person.order.depth)
+```
+
+Variation explained
+```{r}
+aov.hill2 = summary(aov(hill2.read.conc.person.order.depth))
+```
+
+Effect plots
+```{r include = FALSE}
+plot(allEffects(hill2.read.conc.person.order.depth,
+                multiline=TRUE, 
+                confidence.level = 0.95))
+```
+![](hill2_effect.png)
+
+Summary of the richness model
+```{r}
+cbind(sum.hill2$coefficients,
+      confint = confint(hill2.read.conc.person.order.depth))
+```
+
+### Conclusions lab effects
+There are surprisingly many laboratory factors that may result in interpretable patterns in DNA concentration, richness,...
+
+Many of these factors are interconnected on confusing ways (e.g. both DNA concentration and richness are influenced by the extraction order, but richness is itself influenced by the DNA concentration).
+
+Cryptic laboratory factors may be sometimes more important than well-known issues, such as differences among DNA extraction kits. Neither richness, nor diversity was not influenced considerably by the differences among the kits, but both were influenced by the laboratory personnel and the order of DNA extraction.
+
+### Community composition
+
 
 ## Ecological evaluation of the 11-cm Stechlin core
 
@@ -405,9 +783,19 @@ How many reads were found in the horizons? These are already averaged.
 sum(AveragedReps)
 ```
 
-Taxonomy, read abundances and sequences of the remaining OTUs
+Read abundances, taxonomy and sequences of the remaining OTUs
+```{r}
+# Filter the remaining "clean" OTUs
+FilterOTUs = rownames(EmblAssign) %in% rownames(AveragedReps)
 
-
+# write out the final annotated OTU list
+write.csv(file = "OTU_abundance_table.csv",
+          cbind(AveragedReps, 
+                scientific_name = EmblAssign$scientific_name[FilterOTUs],
+                genus_name = EmblAssign$genus_name[FilterOTUs],
+                family_name = EmblAssign$family_name[FilterOTUs],
+                sequence = EmblAssign$sequence[FilterOTUs]))
+```
 
 
 ########
