@@ -1,25 +1,28 @@
 ---
 title: "Lab randomization of samples is important"
 author: "Miki Bálint"
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ``` {r include = FALSE}
+# Color palette
+palette(colors())
 library(vegan)
-library(knitr)
-library(boral)
+# library(knitr)
+# library(boral)
 library(mvabund)
-library(corrplot)
-library(leaps)
-library(car)
-library(mgcv)
+# library(corrplot)
+# library(leaps)
+# library(car)
+# library(mgcv)
 library(effects)
+library(lme4)
 # library(geosphere)
 # library(ape) # installed with ctv, infos here: http://www.phytools.org/eqg/Exercise_3.2/
 # library(vegan3d)
 # library(bvenn)
-
-# Color palette
-palette(colors())
 ```
 
 ## Read in data
@@ -36,6 +39,14 @@ POP_elem = read.csv(file = "../../Data/stechlin_pop_elements.csv",
 ExpSet = read.csv(file = "../../Data/sample_infos.csv",
                   header = T, row.names = 1)
 RepliExp = ExpSet[1:96,]
+
+# re-order the horizon identities
+RepliExp$depth.nominal = factor(RepliExp$depth.nominal)
+
+# re-order the nuclear power plant periods
+RepliExp$nuclear = factor(RepliExp$nuclear,
+                          levels=c("before", 
+                                   "during", "after"))
 ```
 
 How many reads are there?
@@ -107,11 +118,11 @@ set.prior = list(type = c("normal","normal","normal","uniform"),
 
 # LVM ordination on OTUs with relatively low overdispersion
 # This run would take a very long time.
-# comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
-#                  X = RepliExp$reads,
-#                  family = "negative.binomial", 
-#                  prior.control = set.prior, num.lv = 2, n.burnin = 1000, 
-#                  n.iteration = 4000, n.thin = 3)
+comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
+                 X = RepliExp$reads,
+                 family = "negative.binomial",
+                 prior.control = set.prior, num.lv = 2, n.burnin = 1000,
+                 n.iteration = 4000, n.thin = 3)
 ```
 
 Plot the ordination. Currently just include a previous ordination. The `.Rdata` file with the complete ordination run should be loaded once ready
@@ -475,178 +486,170 @@ plot(ExpLab$conc ~ ExpLab$weight,
 
 #### Hypothesis: sample weight, extracting person, extraction order, extraction kit all influence DNA concentration
 
+Linear model first
+```{r}
+lm1 = lm(conc ~ weight + kit + person + 
+           extract_order + DDE.4.4 + nuclear,
+         data = ExpLab)
+```
+
+```{}
+plot(allEffects(lm1, multiline=TRUE, confidence.level=0.95))
+```
+
 Fit the full model
 ```{r}
-conc.weight.kit.personXorder = 
-  lm(conc ~ weight + kit + person*extract_order,
+conc.weight.kit.person.order.age = 
+  lmer(conc ~ weight + kit + person + 
+       extract_order + age + I(age^2) + 
+         (1|depth.nominal),
      data = ExpLab)
-summary(conc.weight.kit.personXorder)
 ```
 
-Simpler model without the person
-```{r}
-conc.weight.kit.order = 
-  lm(conc ~ weight + kit + extract_order,
-     data = ExpLab)
-
-# The more complicated model is not better
-AIC(conc.weight.kit.order)
-AIC(conc.weight.kit.personXorder)
-anova(conc.weight.kit.order, conc.weight.kit.personXorder)
-```
-
-Coefficients and , confidence intervals and statistical significances of the selected model
-```{r}
-cbind(coef = coef(conc.weight.kit.order), 
-      confint(conc.weight.kit.order))
-
-summary(conc.weight.kit.order)
-```
-
-Alternative model: it is the person and not the order what better explains the concentration differences
-```{r}
-conc.weight.kit.person = 
-  lm(conc ~ weight + kit + person,
-     data = ExpLab)
-
-AIC(conc.weight.kit.order)
-AIC(conc.weight.kit.person)
-```
-
-Include the depth as predictor with biological interest
-```{r}
-conc.weight.kit.order.depth = 
-  lm(conc ~ weight + kit + extract_order + depth,
-     data = ExpLab)
-
-sum.conc = summary(conc.weight.kit.order.depth)
-summary(aov(conc.weight.kit.order.depth))
-```
-
-Plot the effects. For some reason it does not get into the output, so I read it in for now
+Visualize the variable effects
 ```{r include = FALSE}
-plot(allEffects(conc.weight.kit.order.depth, 
-                multiline=TRUE, 
-                confidence.level = 0.95))
+plot(allEffects(conc.weight.kit.person.order.age,
+                multiline=TRUE, confidence.level = 0.95))
+
+
+```
+
+the standard errors are lower for the extract_order than for the person
+```{r}
+summary(conc.weight.kit.person.order.age)
+```
+
+Fit without person. The more complex model is not better.
+```{r}
+conc.weight.kit.order.age = 
+  lmer(conc ~ weight + kit + 
+       extract_order + age + I(age^2) +
+         (1|depth.nominal),
+     data = ExpLab)
+
+anova(conc.weight.kit.person.order.age,
+      conc.weight.kit.order.age)
+```
+
+Model results
+```{r}
+summary(conc.weight.kit.order.age)
+```
+
+Visualize the variable effects
+```{r include = FALSE}
+plot(allEffects(conc.weight.kit.order.age,
+                multiline=TRUE, confidence.level = 0.95))
 ```
 ![](conc_effect.png)
 
+The extraction_order explains as much variation as the age.
 ```{r}
-cbind(sum.conc$coefficients,
-      confint(conc.weight.kit.order.depth))
+anova(conc.weight.kit.order.age)
 ```
-
-#### Concentration interpretation
-DNA concentration is decreasing with depth - this is expected since extracellular DNA should be degraded with age.
-
-The extraction order explains almost as much variation in DNA concentration as the depth.
 
 ### Read numbers
 The concentration of the PCR templates was not normalized before multiplexing, so the read numbers may be considered as a measure of PCR efficiency.
 
-#### Hypothesis: read numbers are influenced by the DNA concentration, extraction kit, extracting person, extraction order.
+#### Hypothesis: read numbers are influenced by the DNA concentration, extraction kit, extracting person and the  age of the sediment.
 
 Fit the full model.
 ```{r}
-read.conc.kit.person.order = 
-  lm(reads ~ conc + kit + extract_order + person,
+read.conc.kit.person.order.age = 
+  lmer(reads ~ conc + kit + 
+         extract_order + person + age +
+         (1|depth.nominal),
+     data = ExpLab)
+```
+
+Visualize the variable effects
+```{r include = FALSE}
+plot(allEffects(read.conc.kit.person.order.age,
+                multiline=TRUE, confidence.level = 0.95))
+```
+
+Model summary: the standard errors of the extraction order are higher than those for the person
+```{r}
+summary(read.conc.kit.person.order.age)
+```
+
+Simpler model without the order. The complex model is not better.
+```{r}
+read.conc.kit.person.age = 
+  lmer(reads ~ conc + kit + 
+         person + age +
+         (1|depth.nominal),
      data = ExpLab)
 
-summary(read.conc.kit.person.order)
+anova(read.conc.kit.person.order.age,
+      read.conc.kit.person.age)
 ```
 
-Fit simpler model without the order
-```{r}
-read.conc.kit.person = 
-  lm(reads ~ conc + kit + person,
-     data = ExpLab)
-
-summary(read.conc.kit.person)
-```
-
-The complex model is not better.
-```{r}
-anova(read.conc.kit.person.order,
-      read.conc.kit.person)
-```
-
-The depth of the horizons does not inflence the PCR efficiency.
-```{r}
-read.conc.kit.person.depth = 
-  lm(reads ~ conc + kit + person + depth,
-     data = ExpLab)
-
-summary(read.conc.kit.person.depth)
-summary(aov(read.conc.kit.person.depth))
-```
-
-Plot the effects. Insert plot.
-```{r include=FALSE}
-plot(allEffects(read.conc.kit.person.depth,
-                multiline=TRUE, 
-                confidence.level = 0.95))
+Visualize the variable effects
+```{r include = FALSE}
+plot(allEffects(read.conc.kit.person.age,
+                multiline=TRUE, confidence.level = 0.95))
 ```
 ![](read_effect.png)
 
-It may sound trivial that the person who performs PCRs may have a strong inlfunce on the success of these. By far most explained variation in PCR efficiency was explained by the identity of the lab personnel (the only stat. significant predictor).
+The model with the person is stat. significantly better than a simpler one.
+```{r}
+read.conc.kit.age = 
+  lmer(reads ~ conc + kit + 
+         age + (1|depth.nominal),
+     data = ExpLab)
+
+anova(read.conc.kit.person.age,
+      read.conc.kit.age)
+```
 
 ### Richness
-#### Hypothesis: read numbers, DNA concentration, extraction kit, extracting person, extraction order explain the richness.
+#### Hypothesis: read numbers, DNA concentration, extraction kit, extracting person, extraction order, DDE and nuclear power plant operation explain the richness.
 
 The full model:
 ```{r}
-rich.read.conc.kit.person.order = 
-  lm(HillLab$hill1 ~ reads + conc + 
-       kit + person + extract_order,
+rich.read.conc.kit.person.order.DDE.nuc = 
+  lmer(HillLab$hill1 ~ reads + conc + 
+       kit + person + extract_order +
+         DDE.4.4 + nuclear +
+         (1|depth.nominal),
      data = ExpLab)
-
-summary(rich.read.conc.kit.person.order)
 ```
 
-Simpler model with no kit
-```{r}
-rich.read.conc.person.order = 
-  lm(HillLab$hill1 ~ reads + conc + 
-       person + extract_order,
-     data = ExpLab)
-
-summary(rich.read.conc.person.order)
-
-# the more complex model is not better
-anova(rich.read.conc.person.order, rich.read.conc.kit.person.order)
-```
-
-How do the laboratory factors compare to biologically interesting predictors? Here simply the depth of the samples is used since there might be a change in richness over time.
-```{r}
-rich.read.conc.person.order.depth = 
-  lm(HillLab$hill1 ~ reads + conc + 
-       person + extract_order + depth,
-     data = ExpLab)
-
-# including the depth as predictor considerably improves the model
-anova(rich.read.conc.person.order, rich.read.conc.person.order.depth)
-```
-
-Effect, errors, statistical significance, and variation exmplained by the predictors
-```{r}
-summary.rich = summary(rich.read.conc.person.order.depth)
-
-# Variation partitioning
-aov.rich = summary(aov(rich.read.conc.person.order.depth))
-```
-
-Plot the effects.
+Visualize the variable effects
 ```{r include = FALSE}
-plot(allEffects(rich.read.conc.person.order.depth,
-                multiline=TRUE, 
-                confidence.level = 0.95))
+plot(allEffects(rich.read.conc.kit.person.order.DDE.nuc,
+                multiline=TRUE, confidence.level = 0.95))
+```
+
+Model summary. The kit has a largest relative standard error.
+```{r}
+summary(rich.read.conc.kit.person.order.DDE.nuc)
+```
+
+Simpler model with no kit. Complex model is not better.
+```{r}
+rich.read.conc.person.order.DDE.nuc = 
+  lmer(HillLab$hill1 ~ reads + conc + 
+       person + extract_order +
+         DDE.4.4 + nuclear +
+         (1|depth.nominal),
+     data = ExpLab)
+
+anova(rich.read.conc.kit.person.order.DDE.nuc,
+      rich.read.conc.person.order.DDE.nuc)
+```
+
+Visualize the variable effects
+```{r include = FALSE}
+plot(allEffects(rich.read.conc.person.order.DDE.nuc,
+                multiline=TRUE, confidence.level = 0.95))
 ```
 ![](rich_effects.png)
 
-Summary of the richness model
+The laboratory factors explain comparable variation in richness as the biologically interesting predictors, DDE and nuclear power plant.
 ```{r}
-cbind(summary.rich$coefficients,
-      confint = confint(rich.read.conc.person.order.depth))
+anova(rich.read.conc.person.order.DDE.nuc)
 ```
 
 #### Conclusions richness
@@ -655,56 +658,98 @@ Most variance in richness is explained by the sequencing depth (read numbers). T
 The lab person identity and the order of extraction together explained almost as much variation in the richness as the depth, which was considered here as the predictor with biological interest.
 
 ### Hill's 2 (exp(Shannon diversity))
-#### Hypothesis: Hill's 2 is explained by read numbers, DNA concentration, extraction kit, extracting person, extraction order.
+#### Hypothesis: Hill's 2 is explained by read numbers, DNA concentration, extraction kit, extracting person, extraction order, DDT, nuclear.
 
-The full model. All predictors seem statistically significant.
+Fit the full model.
 ```{r}
-hill2.read.conc.kit.person.order = 
-  lm(HillLab$hill2 ~ reads + conc + 
-       kit + person + extract_order,
+hill2.conc.kit.person.order.DDT.nucl = 
+  lmer(HillLab$hill2 ~ reads + conc + kit + 
+         extract_order + person + DDE.4.4 + nuclear +
+         (1|depth.nominal),
      data = ExpLab)
-
-summary(hill2.read.conc.kit.person.order)
 ```
 
-Adding up the depth. Model fit improves, kit doesn't seem important anymore.
-```{r}
-hill2.read.conc.kit.person.order.depth = 
-  lm(HillLab$hill2 ~ reads + conc + 
-       kit + person + extract_order + depth,
-     data = ExpLab)
-
-summary(hill2.read.conc.kit.person.order.depth)
+Visualize the variable effects
+```{r include = FALSE}
+plot(allEffects(hill2.conc.kit.person.order.DDT.nucl,
+                multiline=TRUE, confidence.level = 0.95))
 ```
 
-Simpler depth model, no kit. All other predictors seem statistically significant.
-```{r}
-hill2.read.conc.person.order.depth = 
-  lm(HillLab$hill2 ~ reads + conc + 
-       person + extract_order + depth,
-     data = ExpLab)
 
-sum.hill2 = summary(hill2.read.conc.person.order.depth)
+Kit doesn't seem important.
+```{r}
+hill2.conc.person.order.DDT.nucl = 
+  lmer(HillLab$hill2 ~ reads + conc + 
+         extract_order + person + DDE.4.4 + nuclear +
+         (1|depth.nominal),
+     data = ExpLab)
 ```
 
-Variation explained
+Complex model not better, kit not justified.
 ```{r}
-aov.hill2 = summary(aov(hill2.read.conc.person.order.depth))
+anova(hill2.conc.kit.person.order.DDT.nucl,
+      hill2.conc.person.order.DDT.nucl)
 ```
 
 Effect plots
 ```{r include = FALSE}
-plot(allEffects(hill2.read.conc.person.order.depth,
-                multiline=TRUE, 
-                confidence.level = 0.95))
+plot(allEffects(hill2.conc.person.order.DDT.nucl,
+                multiline=TRUE, confidence.level = 0.95))
 ```
 ![](hill2_effect.png)
 
-Summary of the richness model
+Model summary
 ```{r}
-cbind(sum.hill2$coefficients,
-      confint = confint(hill2.read.conc.person.order.depth))
+summary(hill2.conc.person.order.DDT.nucl)
 ```
+
+Hill2 variation partitions
+```{r}
+anova(hill2.conc.person.order.DDT.nucl)
+```
+
+
+
+### Community composition
+
+#### Quick ordination
+
+NMDS visualization of the community composition
+```{r}
+MDS.all <- metaMDS(OTULab)
+MDS.all
+```
+
+Plot and color the ordination
+```{r eval=FALSE}
+# colors
+par(mar=c(4,4,1,1))
+plot(MDS.all$points, type="n",
+     xlab="Community axis 1", ylab="Community axis 2")
+ordispider(MDS.all, ExpLab$depth.nominal, col="grey")
+# ordispider(MDS.all, ExpLab$nuclear, col="red")
+points(MDS.all, pch=19, col = as.numeric(ExpLab$depth)*10)
+ordisurf(MDS.all, ExpLab$DDE.4.4, add=T, col =
+           "red")
+ordisurf(MDS.all, ExpLab$age, add=T, col =
+           "grey")
+ordiellipse(MDS.all, ExpLab$nuclear,cex=.5, 
+            draw="polygon", col=c("green"),
+            alpha=100,kind="se",conf=0.95, 
+            show.groups=(c("before")))
+ordiellipse(MDS.all, ExpLab$nuclear,cex=.5, 
+            draw="polygon", col=c("orange"),
+            alpha=100,kind="se",conf=0.95, 
+            show.groups=(c("during")))
+ordiellipse(MDS.all, ExpLab$nuclear,cex=.5, 
+            draw="polygon", col=c("blue"),
+            alpha=100,kind="se",conf=0.95, 
+            show.groups=(c("after")))
+# # mylegend = legend(-1, 0.95, c("North, natural","North, heated","South"), 
+```
+![](NMDS_lab.png)
+
+#### Community models
 
 ### Conclusions lab effects
 There are surprisingly many laboratory factors that may result in interpretable patterns in DNA concentration, richness,...
@@ -712,8 +757,6 @@ There are surprisingly many laboratory factors that may result in interpretable 
 Many of these factors are interconnected on confusing ways (e.g. both DNA concentration and richness are influenced by the extraction order, but richness is itself influenced by the DNA concentration).
 
 Cryptic laboratory factors may be sometimes more important than well-known issues, such as differences among DNA extraction kits. Neither richness, nor diversity was not influenced considerably by the differences among the kits, but both were influenced by the laboratory personnel and the order of DNA extraction.
-
-### Community composition
 
 
 ## Ecological evaluation of the 11-cm Stechlin core
