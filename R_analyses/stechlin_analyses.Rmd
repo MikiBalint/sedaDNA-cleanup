@@ -6,7 +6,7 @@ output:
   pdf_document: default
 ---
 
-``` {r include = FALSE}
+``` {r}
 # Color palette
 palette(colors())
 library(vegan)
@@ -85,7 +85,7 @@ summary(apply(RepliMatrix, 1,sum))
 Estimate overdispersion parameters for each OTU with `mvabund`.
 Fit a negative binomial model where the single predictor is the number
 of reads of each sample.
-```{r}
+```{r eval=FALSE}
 # mvabund input matrix
 Repli.mvabund = mvabund(t(RepliMatrix))
 
@@ -100,7 +100,7 @@ plot(theta.model, which = c(1:3))
 ```
 
 A few OTUs have weird dispersion parameters. 
-```{r}
+```{r eval=FALSE}
 # distribution of the overdispersion parameters
 hist(theta.model$theta)
 hist(log(theta.model$theta)) 
@@ -113,16 +113,16 @@ Try lowering them for a quick(er) look, e.g.
 n.burnin=10, n.iteration=100, n.thin=1.
 ```{r eval = FALSE}
 # Set the overdispersion prior
-set.prior = list(type = c("normal","normal","normal","uniform"),
-                 hypparams = c(100, 20, 100, 20))
-
-# LVM ordination on OTUs with relatively low overdispersion
-# This run would take a very long time.
-comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
-                 X = RepliExp$reads,
-                 family = "negative.binomial",
-                 prior.control = set.prior, num.lv = 2, n.burnin = 1000,
-                 n.iteration = 4000, n.thin = 3)
+# set.prior = list(type = c("normal","normal","normal","uniform"),
+#                  hypparams = c(100, 20, 100, 20))
+# 
+# # LVM ordination on OTUs with relatively low overdispersion
+# # This run would take a very long time.
+# comm.ord = boral(t(RepliMatrix)[,theta.model$theta < 30],
+#                  X = RepliExp$reads,
+#                  family = "negative.binomial",
+#                  prior.control = set.prior, num.lv = 2, n.burnin = 1000,
+#                  n.iteration = 4000, n.thin = 3)
 ```
 
 Plot the ordination. Currently just include a previous ordination. The `.Rdata` file with the complete ordination run should be loaded once ready
@@ -329,19 +329,78 @@ taxon list and DNA concentration list of the positives.
 I looked for a read count rarity threshold of the complete read numbers
 `612963` that would reflect the original positive taxon lists.
 
-When an OTU is present with less, than `31` reads in a replicate 
-(`0.005%` of the total reads `612963`, is considered erroneous 
-and set to `zero`.
+When an OTU is present with less, than `14` reads in a replicate 
+(`0.0015%` of the total reads `sum(ExpSet$reads)` 942742, is considered erroneous and set to `zero`.
 
 ```{r warning=FALSE}
 RareControlled <- EmblControlled
-RareControlled[RareControlled < 31] <- 0
+RareControlled[RareControlled < 14] <- 0
 ```
 
 How many reads after removing rare observations?
 ```{r}
 sum(RareControlled[,IndexSample])
 ```
+
+# Innen
+
+### False positive control with detections in replicates
+Remove OTUs if not observed in at least 2 out of 4 replicates of a horizon
+How to do this was found here: http://stackoverflow.com/questions/9704213/r-remove-part-of-string
+
+Get the sample names. 
+```{r}
+SampleNames = levels(as.factor(sapply(strsplit(names(NoWeirdMatrix),
+                                               split='ep', fixed=TRUE),
+                                      function(x) (x[1]))))
+```
+
+In how many replicates observed per sample?
+```{r}
+PresentReps = data.frame(row.names = rownames(NoWeirdMatrix))
+for (i in SampleNames){
+  ActualSet = grep(i, names(NoWeirdMatrix))
+  Selected = NoWeirdMatrix[ActualSet]
+  Selected[Selected > 0] <- 1 # set the read numbers to 1
+  PresentReps = cbind(PresentReps, apply(Selected, 1, sum))
+}
+colnames(PresentReps) = SampleNames
+```
+
+```{r}
+TrialMatrix = NoWeirdMatrix
+
+SelectSample = names(PresentReps)[21]
+
+SelectMatrix = grep(SelectSample, names(TrialMatrix))
+
+dim(TrialMatrix[,SelectMatrix])
+
+FilterPresent = PresentReps[,SelectSample] < 2
+
+TrialMatrix[FilterPresent,SelectMatrix] <- 0
+
+```
+
+
+### Remove weird replicates
+Visually selected from the `boral` plot above
+```{r}
+# Abundance matrix without the controls
+IndexHorizon = grep("sample.ST", names(RareControlled))
+
+# A filter for weird horizon replicates
+RepliProblemFilter = 
+  names(RareControlled)[IndexHorizon] %in% RepliProblems
+
+# Only the samples kept
+HorizonMatrix = RareControlled[, IndexHorizon]
+
+# Weird replicates removed
+NoWeirdMatrix = HorizonMatrix[, !(RepliProblemFilter)]
+```
+
+
 
 
 ## Effects of laboratory biases
@@ -486,64 +545,31 @@ plot(ExpLab$conc ~ ExpLab$weight,
 
 #### Hypothesis: sample weight, extracting person, extraction order, extraction kit all influence DNA concentration
 
-Linear model first
-```{r}
-lm1 = lm(conc ~ weight + kit + person + 
-           extract_order + DDE.4.4 + nuclear,
-         data = ExpLab)
-```
-
-```{}
-plot(allEffects(lm1, multiline=TRUE, confidence.level=0.95))
-```
-
 Fit the full model
 ```{r}
-conc.weight.kit.person.order.age = 
-  lmer(conc ~ weight + kit + person + 
+conc.weight.kit.order.age = 
+  lmer(conc ~ weight + kit +
        extract_order + age + I(age^2) + 
          (1|depth.nominal),
      data = ExpLab)
-```
 
-Visualize the variable effects
-```{r include = FALSE}
-plot(allEffects(conc.weight.kit.person.order.age,
-                multiline=TRUE, confidence.level = 0.95))
-
-
-```
-
-the standard errors are lower for the extract_order than for the person
-```{r}
-summary(conc.weight.kit.person.order.age)
-```
-
-Fit without person. The more complex model is not better.
-```{r}
-conc.weight.kit.order.age = 
-  lmer(conc ~ weight + kit + 
-       extract_order + age + I(age^2) +
+conc.weight.kit.age = 
+  lmer(conc ~ weight + kit +
+       age + I(age^2) + 
          (1|depth.nominal),
      data = ExpLab)
 
-anova(conc.weight.kit.person.order.age,
-      conc.weight.kit.order.age)
-```
-
-Model results
-```{r}
-summary(conc.weight.kit.order.age)
+anova(conc.weight.kit.order.age,
+      conc.weight.kit.age)
 ```
 
 Visualize the variable effects
-```{r include = FALSE}
+```{r}
 plot(allEffects(conc.weight.kit.order.age,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![](conc_effect.png)
 
-The extraction_order explains as much variation as the age.
+Contributions to variance
 ```{r}
 anova(conc.weight.kit.order.age)
 ```
@@ -551,163 +577,119 @@ anova(conc.weight.kit.order.age)
 ### Read numbers
 The concentration of the PCR templates was not normalized before multiplexing, so the read numbers may be considered as a measure of PCR efficiency.
 
-#### Hypothesis: read numbers are influenced by the DNA concentration, extraction kit, extracting person and the  age of the sediment.
+#### Hypothesis: read numbers are influenced by the DNA concentration, extraction kit and the age of the sediment.
 
 Fit the full model.
 ```{r}
-read.conc.kit.person.order.age = 
+read.conc.kit.order.age = 
   lmer(reads ~ conc + kit + 
-         extract_order + person + age +
-         (1|depth.nominal),
-     data = ExpLab)
-```
-
-Visualize the variable effects
-```{r include = FALSE}
-plot(allEffects(read.conc.kit.person.order.age,
-                multiline=TRUE, confidence.level = 0.95))
-```
-
-Model summary: the standard errors of the extraction order are higher than those for the person
-```{r}
-summary(read.conc.kit.person.order.age)
-```
-
-Simpler model without the order. The complex model is not better.
-```{r}
-read.conc.kit.person.age = 
-  lmer(reads ~ conc + kit + 
-         person + age +
+         extract_order + age +
          (1|depth.nominal),
      data = ExpLab)
 
-anova(read.conc.kit.person.order.age,
-      read.conc.kit.person.age)
-```
-
-Visualize the variable effects
-```{r include = FALSE}
-plot(allEffects(read.conc.kit.person.age,
-                multiline=TRUE, confidence.level = 0.95))
-```
-![](read_effect.png)
-
-The model with the person is stat. significantly better than a simpler one.
-```{r}
 read.conc.kit.age = 
-  lmer(reads ~ conc + kit + 
-         age + (1|depth.nominal),
+  lmer(reads ~ conc + kit + age +
+         (1|depth.nominal),
      data = ExpLab)
 
-anova(read.conc.kit.person.age,
+anova(read.conc.kit.order.age,
       read.conc.kit.age)
 ```
 
-### Richness
-#### Hypothesis: read numbers, DNA concentration, extraction kit, extracting person, extraction order, DDE and nuclear power plant operation explain the richness.
-
-The full model:
-```{r}
-rich.read.conc.kit.person.order.DDE.nuc = 
-  lmer(HillLab$hill1 ~ reads + conc + 
-       kit + person + extract_order +
-         DDE.4.4 + nuclear +
-         (1|depth.nominal),
-     data = ExpLab)
-```
-
 Visualize the variable effects
-```{r include = FALSE}
-plot(allEffects(rich.read.conc.kit.person.order.DDE.nuc,
+```{r}
+plot(allEffects(read.conc.kit.order.age,
                 multiline=TRUE, confidence.level = 0.95))
 ```
 
-Model summary. The kit has a largest relative standard error.
+Variation partition
 ```{r}
-summary(rich.read.conc.kit.person.order.DDE.nuc)
+anova(read.conc.kit.order.age)
 ```
 
-Simpler model with no kit. Complex model is not better.
+### Hill's 1 (richness)
+No DNA concentration included since no reason that should influence the richness. The kit was already shown by others that it influences community observations.
 ```{r}
-rich.read.conc.person.order.DDE.nuc = 
-  lmer(HillLab$hill1 ~ reads + conc + 
-       person + extract_order +
-         DDE.4.4 + nuclear +
+hill1.read.kit.order.nucl = 
+  lmer(HillLab$hill1 ~ reads + kit + 
+         extract_order + nuclear +
          (1|depth.nominal),
      data = ExpLab)
 
-anova(rich.read.conc.kit.person.order.DDE.nuc,
-      rich.read.conc.person.order.DDE.nuc)
+hill1.read.kit.nucl = 
+  lmer(HillLab$hill1 ~ reads + kit + 
+         nuclear +
+         (1|depth.nominal),
+     data = ExpLab)
+
+anova(hill1.read.kit.order.nucl,
+      hill1.read.kit.nucl)
+
+anova(hill1.read.kit.order.nucl)
 ```
 
-Visualize the variable effects
 ```{r include = FALSE}
-plot(allEffects(rich.read.conc.person.order.DDE.nuc,
+plot(allEffects(hill1.read.kit.order.nucl,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![](rich_effects.png)
 
-The laboratory factors explain comparable variation in richness as the biologically interesting predictors, DDE and nuclear power plant.
 ```{r}
-anova(rich.read.conc.person.order.DDE.nuc)
+anova(hill1.read.kit.order.nucl)
 ```
-
-#### Conclusions richness
-Most variance in richness is explained by the sequencing depth (read numbers). The concentration of the sample was not normalized before multiplexing, so in our case the read numbers may be considered as a measure of PCR efficiency.
-
-The lab person identity and the order of extraction together explained almost as much variation in the richness as the depth, which was considered here as the predictor with biological interest.
 
 ### Hill's 2 (exp(Shannon diversity))
-#### Hypothesis: Hill's 2 is explained by read numbers, DNA concentration, extraction kit, extracting person, extraction order, DDT, nuclear.
 
 Fit the full model.
 ```{r}
-hill2.conc.kit.person.order.DDT.nucl = 
-  lmer(HillLab$hill2 ~ reads + conc + kit + 
-         extract_order + person + DDE.4.4 + nuclear +
+hill2.read.kit.order.nucl = 
+  lmer(HillLab$hill2 ~ reads + kit + 
+         extract_order + nuclear +
          (1|depth.nominal),
      data = ExpLab)
+
+hill2.read.kit.nucl = 
+  lmer(HillLab$hill2 ~ reads + kit + 
+         nuclear +
+         (1|depth.nominal),
+     data = ExpLab)
+
+anova(hill2.read.kit.order.nucl,
+      hill2.read.kit.nucl)
+
+anova(hill2.read.kit.order.nucl)
+```
+
+```{r include = FALSE}
+plot(allEffects(hill2.read.kit.order.nucl,
+                multiline=TRUE, confidence.level = 0.95))
+```
+
+### Hill's 3 (inverse Simpson)
+Fit the full model.
+```{r}
+hill3.read.kit.order.nucl = 
+  lmer(HillLab$hill3 ~ reads + kit + 
+         extract_order + nuclear +
+         (1|depth.nominal),
+     data = ExpLab)
+
+hill3.read.kit.nucl = 
+  lmer(HillLab$hill3 ~ reads + kit + 
+         nuclear +
+         (1|depth.nominal),
+     data = ExpLab)
+
+anova(hill3.read.kit.order.nucl,
+      hill3.read.kit.nucl)
+
+anova(hill3.read.kit.order.nucl)
 ```
 
 Visualize the variable effects
 ```{r include = FALSE}
-plot(allEffects(hill2.conc.kit.person.order.DDT.nucl,
+plot(allEffects(hill3.read.kit.order.nucl,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-
-
-Kit doesn't seem important.
-```{r}
-hill2.conc.person.order.DDT.nucl = 
-  lmer(HillLab$hill2 ~ reads + conc + 
-         extract_order + person + DDE.4.4 + nuclear +
-         (1|depth.nominal),
-     data = ExpLab)
-```
-
-Complex model not better, kit not justified.
-```{r}
-anova(hill2.conc.kit.person.order.DDT.nucl,
-      hill2.conc.person.order.DDT.nucl)
-```
-
-Effect plots
-```{r include = FALSE}
-plot(allEffects(hill2.conc.person.order.DDT.nucl,
-                multiline=TRUE, confidence.level = 0.95))
-```
-![](hill2_effect.png)
-
-Model summary
-```{r}
-summary(hill2.conc.person.order.DDT.nucl)
-```
-
-Hill2 variation partitions
-```{r}
-anova(hill2.conc.person.order.DDT.nucl)
-```
-
 
 
 ### Community composition
@@ -721,7 +703,7 @@ MDS.all
 ```
 
 Plot and color the ordination
-```{r eval=FALSE}
+```{r}
 # colors
 par(mar=c(4,4,1,1))
 plot(MDS.all$points, type="n",
@@ -747,16 +729,130 @@ ordiellipse(MDS.all, ExpLab$nuclear,cex=.5,
             show.groups=(c("after")))
 # # mylegend = legend(-1, 0.95, c("North, natural","North, heated","South"), 
 ```
-![](NMDS_lab.png)
+
 
 #### Community models
 
-### Conclusions lab effects
-There are surprisingly many laboratory factors that may result in interpretable patterns in DNA concentration, richness,...
+##### Explore the read abundances
+```{r eval=FALSE}
+pdf(file="OTU_plots.pdf", height = 100, width = 7)
+par(mfrow=c(68,5), mar = c(3,2,2,0.5))
+for(i in names(OTULab)){
+  plot(ExpLab$age, OTULab[,i], pch=19, cex = 0.5,
+       xlab = "age", ylab="", main = i,
+       col = (as.numeric(ExpLab$nuclear)+10)^2)
+}
+dev.off()
+```
 
-Many of these factors are interconnected on confusing ways (e.g. both DNA concentration and richness are influenced by the extraction order, but richness is itself influenced by the DNA concentration).
+I need a general, community-level statistic. `mvabund` cannot deal with random effects: I ommit the horizon effect completely.
 
-Cryptic laboratory factors may be sometimes more important than well-known issues, such as differences among DNA extraction kits. Neither richness, nor diversity was not influenced considerably by the differences among the kits, but both were influenced by the laboratory personnel and the order of DNA extraction.
+I will include 
+```{r}
+# input data
+OTU.mva = mvabund(OTULab)
+
+# full model fit
+OTU.horizon.read.kit.order.nucl =
+  manyglm(OTU.mva ~ depth.nominal + reads + kit + 
+            extract_order + nuclear,
+          data = ExpLab, family = "negative.binomial")
+```
+
+Model coefficients for nuclear, confidence intervals
+```{r}
+CoefDuring = 
+  OTU.horizon.read.kit.order.nucl$coefficients[25,]
+StdErrDuring = 
+  OTU.horizon.read.kit.order.nucl$stderr.coefficients[25,]
+
+CI.2.5.During = CoefDuring-2*StdErrDuring
+CI.97.5.During = CoefDuring+2*StdErrDuring
+
+CoefAfter = 
+  OTU.horizon.read.kit.order.nucl$coefficients[26,]
+StdErrAfter = 
+  OTU.horizon.read.kit.order.nucl$stderr.coefficients[26,]
+
+CI.2.5.After = CoefAfter-2*StdErrAfter
+CI.97.5.After = CoefAfter+2*StdErrAfter
+
+
+c(mean(x)-2*sem,mean(x)+2*sem)
+
+Coefs = data.frame(CoefDuring,CoefAfter,
+                   StdErrDuring,StdErrAfter,
+                   CI.2.5.During, CI.97.5.During,
+                   CI.2.5.After, CI.97.5.After)
+```
+
+Filter consistent coefficients
+```{r}
+FilterDuring = 
+  c(Coefs$CI.2.5.During > 0 & Coefs$CI.97.5.During > 0) |
+  c(Coefs$CI.2.5.During < 0 & Coefs$CI.97.5.During < 0)
+
+FilterAfter = 
+  c(Coefs$CI.2.5.After > 0 & Coefs$CI.97.5.After > 0) |
+  c(Coefs$CI.2.5.After < 0 & Coefs$CI.97.5.After < 0)
+
+seq(0,max(OTULab[,rownames(Coefs[FilterDuring,])]))
+
+plot(ExpLab$age,
+     seq(0,max(OTULab[,rownames(Coefs[FilterDuring,])]),
+         length.out = 76),
+     type="n")
+for (i in rownames(Coefs[FilterDuring,])){
+  color = 1
+  points(ExpLab$age, OTULab[,i], pch=19)
+  # color = color + 1
+}
+
+
+rownames(Coefs[FilterDuring,])
+```
+
+
+Are there some coefficients were the std. err. is not exceedingly high (e.g. less, than 10X of the coefficient)?
+```{r}
+FilterDuring = 
+  10*abs(Coefs$CoefDuring) >= Coefs$StdErrDuring
+FilterAfter = 
+  10*abs(Coefs$CoefAfter) >= Coefs$StdErrAfter
+
+rownames(Coefs[FilterAfter,]) %in% rownames(Coefs[FilterDuring,])
+
+# Coefficients maybe interesting
+CoefPlot = 
+  Coefs[FilterDuring | FilterAfter,]
+```
+
+plot coefficients
+```{r}
+plot(min(CoefPlot):max(CoefPlot),
+     c(1:nrow(CoefPlot)))
+```
+
+ANOVA test of effects
+```{r eval=FALSE}
+# OTU.anova = anova(OTU.horizon.read.kit.order.nucl,
+#                   nBoot = 10, test = "LR")
+```
+
+Variations explained and statistical significances
+```{r eval=FALSE}
+# OTU.anova$table
+```
+
+```{r eval=FALSE}
+# OTU.summary = summary(OTU.horizon.read.kit.order.nucl,
+#                       nBoot = 10, test = "LR")
+```
+
+```{r eval=FALSE}
+# OTU.summary$coefficients
+```
+
 
 
 ## Ecological evaluation of the 11-cm Stechlin core
