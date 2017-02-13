@@ -255,6 +255,9 @@ library(mvabund)
 ```
 
 ## Read in data
+Get the data here:
+https://figshare.com/s/32dbca0a906c7f06449b
+
 ```{r}
 # Read abundances
 EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
