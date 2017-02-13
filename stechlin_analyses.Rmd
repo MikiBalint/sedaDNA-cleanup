@@ -1,5 +1,5 @@
 ---
-title: "Randomize molecular ecology lab experiments"
+title: "Proper experimental design requires randomization/balancing of molecular ecology experiments"
 author: Miklós Bálint, Orsolya Márton, Marlene Schatz, Rolf-Alexander Düring, Hans-Peter Grossart
 output:
   pdf_document: default
@@ -237,34 +237,17 @@ library(lme4)
 library(mvabund)
 ```
 
-```{r eval=FALSE, include=FALSE}
-# Other possible packages
-
-# Color palette
-# palette(colors())
-# library(knitr)
-# library(boral)
-# library(corrplot)
-# library(leaps)
-# library(car)
-# library(mgcv)
-# library(geosphere)
-# library(ape) # installed with ctv, infos here: http://www.phytools.org/eqg/Exercise_3.2/
-# library(vegan3d)
-# library(bvenn)
-```
-
 ## Read in data
 Get the data here:
 https://figshare.com/s/32dbca0a906c7f06449b
 
 ```{r}
 # Read abundances
-EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
+EmblAssign = read.csv(file="stechlin_assigned_190915.tab",
                       header=T, sep='|', row.names = 1)
 
 # Read experimental setup data
-ExpSet = read.csv(file = "../../Data/sample_infos.csv",
+ExpSet = read.csv(file = "sample_infos.csv",
                   header = T, row.names = 1)
 RepliExp = ExpSet[1:96,]
 
@@ -284,12 +267,6 @@ sum(EmblAssign[,IndexSample])
 ```
 
 ## Data cleanup
-The aim is double: 1) to deal with potential contaminants that may show up in the negative, and 2) to establish a read abundance credibility treshold using the samples that were in the positive controls. 
-
-The assumptions of 1) is that contaminant OTUs observerd in the negatives had their best chances to be present in large numbers only in those negatives since they would have faced PCR competition in any other samples. Thus the most conservative way of dealing with contaminant OTUs is to subtract the maximum number of reads that belongs to them from any other sample where they were also observed.
-
-The reasons behind 2) is that there were only known taxa put into the positives and if others are showing up, they may only come from rare errors. Thus unexpected taxon reads in the positives should give a general sequence rarity treshold for the entire dataset.
-
 ### Heads, singletons, internals
 This step is specific to the OBITools sequence processing pipeline.
 
@@ -374,7 +351,7 @@ sum(EmblControlled[,IndexSample])
 Write sequence variants of taxa into table
 ```{r}
 write.csv(file = "variant_sequences.csv", 
-          data.frame(name = rownames(EmblControlled),                   
+          data.frame(name = rownames(EmblControlled),     
                      name = EmblControlled$scientific_name,
                      genus = EmblControlled$genus_name,
                      family = EmblControlled$family_name,
@@ -406,11 +383,9 @@ write.csv(file="positive_controls.csv", PosAbundances)
 
 I manually compared the reads of these OTUs to the 
 taxon list and DNA concentration list of the positives.
-I looked for a read count rarity threshold of the complete read numbers
-`942742` that would reflect the original positive taxon lists.
+I looked for a read count rarity threshold of the complete read numbers `942742` that would reflect the original positive taxon lists.
 
-When an OTU is present with less, than `14` reads in a replicate 
-(`0.0015%` of the total reads `sum(ExpSet$reads)` 942742, is considered erroneous and set to `zero`.
+When an OTU is present with less, than `14` reads in a replicate (`0.0015%` of the total reads `sum(ExpSet$reads)` 942742, is considered erroneous and set to `zero`.
 
 ```{r warning=FALSE}
 RareControlled <- EmblControlled
@@ -466,14 +441,14 @@ Linear mixed effect models are used for the singe response models with the sedim
   + Unexpected laboratory effect:
     +lab person
   + Biological effect of interest:
-    + the age of the sediment with a higher hump at intermediate ages (visible from an exploratory plot)
+    + the age of the sediment
     
 ```{r}
 plot(ExpLab$conc ~ ExpLab$age, pch=19,
      xlab = "Age (years)", ylab = "DNA concentration (ng/ul)")
 ```
     
-2. PCR success as indicated by the number of sequence reads per sample. PCR product concentrations were not normalized before multiplexing the samples for sequencing, thus the differences in read numbers may be used to evaluate PCR performance (e.g. `Taberlet papers`)
+2. PCR success as indicated by the number of sequence reads per sample. PCR product concentrations were not normalized before multiplexing the samples for sequencing, thus the differences in read numbers may be used to evaluate PCR performance
   + Expected laboratory effect:
     + DNA concentration
     + extraction kit
