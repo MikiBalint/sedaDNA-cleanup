@@ -1,12 +1,235 @@
 ---
-title: "Lab randomization of samples is important"
-author: Miki Bálint, Orsolya Márton, Marlene Schatz, Rolf-Alexander Düring, Hans-Peter Grossart
+title: "Randomize molecular ecology lab experiments"
+author: Miklós Bálint, Orsolya Márton, Marlene Schatz, Rolf-Alexander Düring, Hans-Peter Grossart
 output:
   pdf_document: default
   html_document: default
 ---
 
-# Load libraries
+# OBITools sequence processing
+OBITools v1.2.7, downloaded on July 17, 2016. Sequence processing was performed in a `bash` terminal on a linux computer.
+
+## Step 0: create a small dataset to check the script
+parallel citation: **Tange 2011**
+
+    mkdir data
+    cd data
+    ln -s /phylodata/mbalint/datasets/160329_Stechlin-preexp/data/*.fastq .
+    mkdir complete_files
+    mv *.fastq complete_files/
+    cd complete_files
+    ls *.fastq | parallel -j 60 'head -n 400 {} > trial_{.}.fastq'
+    mv trial*.fastq ../
+    cd ../
+
+## Step 1: Quality check
+
+    mkdir 01_fastqc
+    ls *.fastq | parallel -j 60 'fastqc -o 01_fastqc'
+    mv 01_fastqc /phylodata/mbalint/workdir/Stechlin_preexp
+    cd /phylodata/mbalint/workdir/Stechlin_preexp/01_fastqc
+    rm *.zip
+
+## Step 2: Trimming
+Check the trimming length with the primers.
+*Guardiola 2015*: Euka2-F (TYTGTCTGSTTRATTSCG 18bp), Euka2-R (TCACAGACCTGTTATTGC 18bp)
+Fragment length: most species ~110 bp, some ~150 bp + primers 2 x 20 bp
+All reads trimmed to 100 bp: this should be shorter then the fragment length, and allows the assembly of the ~150 bp reads (fragment + primer)
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 02_trimmed
+    cd 02_trimmed
+    ln -s ../data/*.fastq . # link because the parallel input is simpler for me this way
+    ls *.fastq | parallel -j 60 'fastx_trimmer -t 51 -i {} -o {.}_trimmed.fastq' # -t: remove 51 nucleotides from the ends
+    rm *001.fastq # remove the links. the -j 60 option of the parallel uses 60 processors
+
+## Step 3: Paired-end assembly
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 03_paired-end
+    cd 03_paired-end
+
+Link all files into present folder, because it is less complicated to use the parallel inputting for me
+
+    ln -s ../02_trimmed/*trimmed.fastq .
+
+    ls *trimmed.fastq | grep -v R2_001_trimmed.fastq | sed 's/R1_001_trimmed.fastq//' | parallel -j 60 'illuminapairedend --score-min=40  -r {.}R2_001_trimmed.fastq {.}R1_001_trimmed.fastq > {.}paired.fastq'
+
+1. list the filenames.
+2. keep the file name stems by removing the forward-reverse specific file information with 'sed'.
+3. give the filename stems to parallel as `{.}`.
+
+remove the links
+
+    rm *001_trimmed.fastq
+
+Paired quality check
+
+    mkdir fastqc_paired # create a folder for the fastqc output
+    ls *_paired.fastq | parallel -j 60 'fastqc -o fastqc_paired {}'
+    rm fastqc_paired/*.zip # keep only the htmls
+
+Remove primers from the read ends
+Primers are 18 bp
+Insert the sequence length (seq_length) into the headers
+
+    ls *.fastq | parallel -j 60 'obiannotate --length --fasta-output {} > {.}_wlength.fasta'
+
+Trim the reverse primers from the read ends. Reverse primer bases calculated with the seq_length
+    
+    ls *.fasta | parallel -j 60 'obicut -b 19 -e seq_length-18 --uppercase {} > {.}_noprimer.fasta'
+
+## Step 4. Remove unaligned
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 04_unaligned
+    cd 04_unaligned
+
+the steps are different from the conventional OBITools pipeline from now on: the samples are already demultiplexed, but the sample names are not yet in the fastq header lines.
+
+The sample names should be inserted as 'sample=xxx; ' before the 'ali_length=xxx;'
+The rename.pl is a small script modified from **Bálint Ecol Evol**
+Original in /phylodata/mbalint/scripts
+
+    cp /phylodata/mbalint/scripts/rename_fasta.pl . # copy the rename script
+    ln -s ../03_paired-end/*_noprimer.fasta .
+    perl rename_fasta.pl
+    rm *noprimer.fasta
+
+Now combine the files
+
+    cat *renamed.fasta > combined.fasta
+    obigrep -p 'mode!="joined"' combined.fasta > combined_ali.fasta
+
+Successfully assembled sequences
+
+    grep -c "^>" combined_ali.fasta
+
+Remove sequences shorter, that 50 bp
+
+    obigrep -l 50 combined_ali.fasta > combined_noshort.fasta
+    grep -c "^>" combined_noshort.fasta
+
+## Step 5: chimera checking
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 05_chimera
+    cd 05_chimera
+    ln -s ../04_unaligned/combined_noshort.fasta .
+
+vsearch for chimera checking
+Documentation here: https://wiki.gacrc.uga.edu/wiki/Vsearch#Documentation
+
+    vsearch --threads 60 --uchime_denovo combined_noshort.fasta --uchimeout chimera_results.tab --nonchimeras stechlin_nonchimera.fasta --chimeras stechlin_chimera.fasta
+
+## Step 6: De-replicate into unique sequences
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 06_derep
+    cd 06_derep
+    
+Since all were non-chimeric and the VSEARCH chimera checking screws the header, let's use the chimieracheck input file
+
+    obiuniq -m sample ../05_chimera/combined_noshort.fasta > stechlin_derep.fasta
+    grep -c "^>" stechlin_derep.fasta
+
+## Step 7: Denoise the dataset
+
+Get the counts of the 20 rarest sequences
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 07_denoise
+    cd 07_denoise
+    obistat -c count ../06_derep/stechlin_derep.fasta | sort -nk1 | head -20 > rare_counts.txt
+
+Keep only the sequence variants having a count greater or equal to 10:
+
+    obigrep -p 'count>=10' ../06_derep/stechlin_derep.fasta > stechlin_c10.fasta
+    grep -c "^>" stechlin_c10.fasta
+
+## Step 8: Clean the sequences
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 08_clean
+    cd 08_clean
+
+keep only head sequences ( -H option) if these are sequences with no variants with a count greater than 5% of their own count ( -r 0.05 option). This also annotates sequences as head, internal or singleton in a sample.
+
+    obiclean -s merged_sample -r 0.05 -H ../07_denoise/stechlin_c10.fasta > stechlin_clean.fasta
+    grep -c "^>" stechlin_clean.fasta
+
+## Step 9: ecoPCR databases
+
+Download and format the databases. These steps are commented out if the databases exist.
+Actual database EMBL v128
+
+    cd /phylodata/mbalint/databases/
+    mkdir EMBL_128
+    cd EMBL_128
+    wget ftp://ftp.ebi.ac.uk/pub/databases/embl/release/std/rel_std*.*
+
+Get the actual GenBank taxonomy
+
+    cd /phylodata/mbalint/databases/
+    mkdir Taxonomy_160908
+    cd Taxonomy_160908
+    wget ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz
+    tar -zxvf taxdump.tar.gz
+
+Create the EMBL v128 ecoPCR database. Use '--skip-on-error' to get through some problematic EMBL entries.
+It may not be necessary to unpack 'gz' beforehand, try using '*.dat.gz'
+
+    cd /phylodata/mbalint/databases
+    mkdir ecoPCR_embl_128
+    cd ecoPCR_embl_128/
+    obiconvert --skip-on-error --embl -t ../Taxonomy_160908 --ecopcrdb-output=ecopcr_embl_128 ../EMBL_128/*.dat.gz
+
+Generate an ecoPCR assignment database with the Euka2 primers
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 09_ecopcr
+    cd 09_ecopcr
+    ecoPCR -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 -e 3 -l 50 -L 500 TCACAGACCTGTTATTG#C# TYTGTCTGSTTRATTSC#G# > i18S_V9.ecoPCR
+    grep -cv '#' *.ecoPCR
+
+Clean the databases. 
+
+Filter sequences so that they have a good taxonomic description at the species, genus, and family levels
+    
+    obigrep -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 --require-rank=species --require-rank=genus --require-rank=family i18S_V9.ecoPCR > i18S_V9_clean.fasta
+    
+remove redundant sequences (obiuniq command below).
+
+    obiuniq -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 i18S_V9_clean.fasta > i18S_V9_clean_uniq.fasta
+
+ensure that the dereplicated sequences have a taxid at the family level (obigrep command below).
+
+    obigrep -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 --require-rank=family i18S_V9_clean_uniq.fasta > i18S_V9_clean_uniq_clean.fasta
+
+ensure that sequences each have a unique identification (obiannotate command below)
+
+    obiannotate --uniq-id i18S_V9_clean_uniq_clean.fasta > db_i18S_v9.fasta
+
+## Step 10: Taxonomic assignment
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 10_assign
+    cd 10_assign
+    ecotag -d /phylodata/mbalint/databases/ecoPCR_embl_128/ecopcr_embl_128 -R ../09_ecopcr/db_i18S_v9.fasta --sort=count -m 0.98 -r ../08_clean/stechlin_clean.fasta > stechlin_assigned.fasta
+    grep -c ">" stechlin_assigned.fasta
+
+## Step 11: Abundance tables
+
+    cd /phylodata/mbalint/workdir/Stechlin_preexp
+    mkdir 11_abundance_tables
+    cd 11_abundance_tables
+
+create assigned abundance matrix
+
+    obitab -o --output-field-separator="|"  ../10_assign/stechlin_assigned.fasta > stechlin_assigned_190915.tab
+
+# R analyses
+
+## Load libraries
 ``` {r}
 library(vegan)
 library(effects)
@@ -31,15 +254,11 @@ library(mvabund)
 # library(bvenn)
 ```
 
-# Read in data
+## Read in data
 ```{r}
 # Read abundances
 EmblAssign = read.csv(file="../../Data/stechlin_assigned_190915.tab",
                       header=T, sep='|', row.names = 1)
-
-# Read POP and elements data
-POP_elem = read.csv(file = "../../Data/stechlin_pop_elements.csv", 
-                    header = T, row.names = 1)
 
 # Read experimental setup data
 ExpSet = read.csv(file = "../../Data/sample_infos.csv",
@@ -61,7 +280,7 @@ IndexSample = grep("sample.[EMPS]", names(EmblAssign))
 sum(EmblAssign[,IndexSample])
 ```
 
-# Data cleanup
+## Data cleanup
 The aim is double: 1) to deal with potential contaminants that may show up in the negative, and 2) to establish a read abundance credibility treshold using the samples that were in the positive controls. 
 
 The assumptions of 1) is that contaminant OTUs observerd in the negatives had their best chances to be present in large numbers only in those negatives since they would have faced PCR competition in any other samples. Thus the most conservative way of dealing with contaminant OTUs is to subtract the maximum number of reads that belongs to them from any other sample where they were also observed.
@@ -201,12 +420,11 @@ sum(RareControlled[,IndexSample])
 ```
 
 
-# Effects of laboratory biases
-I use all replicates here however weird (similar to negatives or positives, wide away from the other replicates form the same horizon). 
-
+## Effects of laboratory biases
+I use all replicates here however weird.
 The reason - the aim here is to quantify the effects of potentially systemic lab biases, so all biases qualify except standard contamination issues and rare weird sequences.
 
-## Generate the needed matrices: OTU abundances and corresponding predictors.
+### Generate the needed matrices: OTU abundances and corresponding predictors.
 
 ```{r}
 # Predictors of lab effects
@@ -237,7 +455,7 @@ boxplot(ExpLab$conc ~ ExpLab$person,
 
 Linear mixed effect models are used for the singe response models with the sediment profile identity as the random effect.
 
-## The variables of interest and their predictors 
+### The variables of interest and their predictors 
 1. DNA concentration
   + Expected laboratory effect: 
     + sample weight
@@ -269,20 +487,25 @@ plot(ExpLab$conc ~ ExpLab$age, pch=19,
   + biological effect of interest:
     + the effects of the construction/operation period of a nuclear power plant (1960 - 1990). We know that lake communities were strongly changed after building the plant from previous morphology-based works.
 
-## DNA concentration
+### DNA concentration
 Fit the full model
 ```{r}
 conc.weight.kit.person.age = 
   lmer(conc ~ weight + kit +
-       person + age + I(age^2) + 
+       person + age + 
          (1|depth.nominal),
      data = ExpLab)
 
 conc.weight.kit.age = 
   lmer(conc ~ weight + kit +
-       age + I(age^2) + 
+       age + 
          (1|depth.nominal),
      data = ExpLab)
+```
+
+Most of the variation in the DNA concentration is explained by the isolation kit. The lab person explains about as much variation as the age of the sediment.
+```{r}
+anova(conc.weight.kit.person.age)
 ```
 
 The DNA concentration model is marginally statistically significantly improved by accounting for the lab person.
@@ -293,18 +516,13 @@ anova(conc.weight.kit.person.age,
 ```
 
 Visualize the variable effects. For some reason the `effects` package does not plot into the knitted document, so I use a saved image.
-```{r eval=FALSE}
+```{r}
 plot(allEffects(conc.weight.kit.person.age,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![Predictors of extracted DNA concentration](conc_effect.png)
 
-Most of the variation in the DNA concentration is explained by the isolation kit. The lab person explains about as much variation as the age of the sediment.
-```{r}
-anova(conc.weight.kit.person.age)
-```
 
-## PCR success
+### PCR success
 ```{r}
 read.conc.kit.pers.age = 
   lmer(reads ~ conc + kit + person + age + (1|depth.nominal),
@@ -315,6 +533,11 @@ read.conc.kit.age =
        data = ExpLab)
 ```
 
+The lab person explained far the most variation in PCR success, with the samples extracted by the second authors yielding consistently less reads (all PCR reactions were performed by the second author). 
+```{r}
+anova(read.conc.kit.pers.age)
+```
+
 The model of PCR success was statistically significantly improved by considering the lab person.
 ```{r}
 anova(read.conc.kit.pers.age,
@@ -323,19 +546,13 @@ anova(read.conc.kit.pers.age,
 
 The **DNA concentration** had no consistent effects on the PCR success within a 95% confidence interval (although PCRs produced more reads with higher template concentrations). The **age** of the sediment had no effect on PCR success.
 
-```{r eval=FALSE}
+```{r}
 plot(allEffects(read.conc.kit.pers.age,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![Predictors of the obtained read numbers per sample (PCR success)](read_effect.png)
 
-The lab person explained far the most variation in PCR success, with the samples extracted by the second authors yielding consistently less reads (all PCR reactions were performed by the second author). 
-```{r}
-anova(read.conc.kit.pers.age)
-```
-
-# Community structure
-## Diversity indicators
+### Community structure
+#### Diversity indicators
 
 Hill's first three numbers of diversity corrspond to richness (Hill's 1), the exponent of Shannon diversity (Hill's 2) and the inverse of the Simpson diversity (Hill's 3).
 ```{r}
@@ -343,7 +560,7 @@ HillLab = renyi(OTULab, scale = c(0,1,2), hill = T)
 names(HillLab) = c("hill1", "hill2", "hill3")
 ```
 
-### Hill's 1 (richness)
+##### Hill's 1 (richness)
 
 ```{r}
 hill1.read.kit.pers.nucl = 
@@ -357,6 +574,11 @@ hill1.read.kit.nucl =
      data = ExpLab)
 ```
 
+Most variation in richness was explained by the PCR success, followed by the operation period of the nuclear power plant. The extraction kits also consistently predicted variation in richness, with more OTUs recorded in the replicates extracted with the Macherey-Nagel kit. The variation explained by the lab person was minor. Communities in the lake were less species-rich following the construction of the plant.
+```{r}
+anova(hill1.read.kit.pers.nucl)
+```
+
 Considering the lab person did not 
 ```{r}
 anova(hill1.read.kit.pers.nucl,
@@ -365,20 +587,12 @@ anova(hill1.read.kit.pers.nucl,
 
 The richness model was not improved by including the lab person as predictor.
 
-```{r include = FALSE}
+```{r}
 plot(allEffects(hill1.read.kit.pers.nucl,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![Predictors of Hill's 1 (richness)](hill1_effect.png)
 
-Most variation in richness was explained by the PCR success, followed by the operation period of the nuclear power plant. The extraction kits also consistently predicted variation in richness, with more OTUs recorded in the replicates extracted with the Macherey-Nagel kit. The variation explained by the lab person was minor. Communities in the lake were less species-rich following the construction of the plant.
-
-```{r}
-anova(hill1.read.kit.pers.nucl)
-```
-
-### Hill's 2 (exp(Shannon diversity))
-
+##### Hill's 2 (exp(Shannon diversity))
 ```{r}
 hill2.read.kit.pers.nucl = 
   lmer(HillLab$hill2 ~ reads + kit + person + nuclear +
@@ -391,6 +605,11 @@ hill2.read.kit.nucl =
      data = ExpLab)
 ```
 
+The identity of the lab person explains almost no variation in Hill's 2.
+```{r}
+anova(hill2.read.kit.pers.nucl)
+```
+
 The model of Hill's 2 was not improved by considering the lab person's identity.
 ```{r}
 anova(hill2.read.kit.pers.nucl,
@@ -399,18 +618,14 @@ anova(hill2.read.kit.pers.nucl,
 
 Hill's 2 was strongly influenced by the PCR success. The replicates extracted with the MN-kit consistently had higher Hill's 2 values. Hill's 2 strongly decreased after the construction of the power plant.
 
-```{r include = FALSE}
+```{r}
 plot(allEffects(hill2.read.kit.pers.nucl,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![Predictors of Hill's 2](hill2_effect.png)
 
-The identity of the lab person explains almost no variation in Hill's 2.
-```{r}
-anova(hill2.read.kit.pers.nucl)
-```
 
-### Hill's 3 (inverse Simpson)
+
+##### Hill's 3 (inverse Simpson)
 Fit the full model.
 ```{r}
 hill3.read.kit.pers.nucl = 
@@ -424,6 +639,11 @@ hill3.read.kit.nucl =
      data = ExpLab)
 ```
 
+The lab person explained little variation in Hill's 3.
+```{r}
+anova(hill3.read.kit.pers.nucl)
+```
+
 The lab person identity did not improve the Hill's 2 model.
 ```{r}
 anova(hill3.read.kit.pers.nucl,
@@ -431,38 +651,30 @@ anova(hill3.read.kit.pers.nucl,
 ```
 
 The effects of the nuclear power plant explained most variation in Hill's 3, resulting in lower diversity after. These were followed by the PCR success and the effects.
-```{r include = FALSE}
+```{r}
 plot(allEffects(hill3.read.kit.pers.nucl,
                 multiline=TRUE, confidence.level = 0.95))
 ```
-![Precictors of Hill's 3](hill3_effect.png)
 
-The lab person explained little variation in Hill's 3.
-```{r}
-anova(hill3.read.kit.pers.nucl)
-```
+#### Community composition
 
-## Community composition
-### Quick NMDS
-```{r}
-MDS.all <- metaMDS(OTULab)
-MDS.all
-```
-
-Plot and color the ordination
+Colors for ordination
 ```{r}
 # colors
 colfunc <- colorRampPalette(c("green", "brown"))
 MyColors = colfunc(83)
+```
 
+```{r eval=FALSE, include=FALSE}
+# Quick NMDS
+MDS.all <- metaMDS(OTULab)
+MDS.all
 par(mar=c(4,4,1,1))
 plot(MDS.all$points, type="n",
      xlab="Community axis 1", ylab="Community axis 2")
 ordispider(MDS.all, ExpLab$depth.nominal, col="grey")
 # plot the points re-ordered according to depth
 points(MDS.all$points[order(ExpLab$depth),], pch=19, col = MyColors)
-ordisurf(MDS.all, ExpLab$age, add=T, col =
-           "grey")
 ordiellipse(MDS.all, ExpLab$nuclear,cex=.5, 
             draw="polygon", col=c("green"),
             alpha=100,kind="se",conf=0.95, 
@@ -475,13 +687,9 @@ ordiellipse(MDS.all, ExpLab$nuclear,cex=.5,
             draw="polygon", col=c("blue"),
             alpha=100,kind="se",conf=0.95, 
             show.groups=(c("after")))
-# # mylegend = legend(-1, 0.95, c("North, natural","North, heated","South"), 
-# ordisurf(MDS.all, ExpLab$DDE.4.4, add=T, col =
-#            "red")
 ```
-The replicates are colored according to the sample. Note the weird replicates those all pull toward the negative - positive controls on the complete ordination (not yet shown). The ellipses show the 95% CI group centroids of replicates from before 1960 (green), between 1960-1990 (orange), after 1990 (blue). The countours mar the sediment age. 
 
-### Models of community
+##### Models of community
 I need a general, community-level statistic. `mvabund` cannot deal with random effects: I ommit the horizon identity completely and treat the replicates as independent although they are not
 
 I will compare this with `PERMANOVA` in the `adonis` with `strata` specified as horizons to consider nestedness.
@@ -501,7 +709,6 @@ Variation partitioning and predictor stat. significance. Save the ANOVA results.
 ```{r eval=FALSE}
 OTU.anova = anova(OTU.read.kit.pers.nucl,
                   nBoot = 100, test = "LR")
-
 save(OTU.anova, file="lab-methods_OTU_anova.RData")
 ```
 
@@ -515,7 +722,7 @@ Variations explained and statistical significances. Most variation is explained 
 OTU.anova
 ```
 
-### Ordination with latent variables
+##### Ordination with latent variables
 Are there OTUs with weird overdispersion parameters? These are calculated by `mvabund`.
 
 ```{r}
@@ -534,58 +741,98 @@ Fit the `boral` model only with the OTUs that are not exceedingly overdispersed.
 # LV ordination done on all OTUs with relatively low overdispersion
 save.image(file="Lab_Boral_Data.RData")
 
+
 LabLVMOrd = boral(OTULab[,OTU.read.kit.pers.nucl$theta < 31],
                   X = ExpLab$reads,
                   family = "negative.binomial", 
                   prior.control = set.prior, 
-                  num.lv = 2, n.burnin = 1000, 
-                  n.iteration = 10000, n.thin = 9)
+                  num.lv = 2, n.burnin = 10000, 
+                  n.iteration = 40000, n.thin = 30)
 
-save(LabLVMOrd, file="Lab_LV_model_10000-iter.RData")
+save(LabLVMOrd, file="Lab_LV_model_40000-iter.RData")
 ```
 
-Plot the ordination. Currently just include a previous ordination. The `.Rdata` file with the complete ordination run should be loaded once ready
-with `load.image()`, or knitted with `rmarkdown::render("your_doc.Rmd")`.
-```{r eval=FALSE}
-# Colors and symbols for samples
-RepliExpColors = data.frame(RepliExp, 
-                            symbols = c(c(rep(22,4), rep(23,2), 
-                                          rep(24,4), rep(25,2)),
-                                        na.omit(RepliExp$depth.nominal)))
-sample_colors = c(levels(factor(RepliExpColors$symbols*10)))
-sample_legend = c(levels(factor(RepliExpColors$depth)), 
-                  c("Extraction control",
-                    "Multiplex control",
-                    "PCR control",
-                    "Mock community"))
+Load the `boral` results
+```{r}
+load("Lab_LV_model_40000-iter.RData")
+```
 
-# The LVM ordination plot
-par(mfrow = c(1,1), mar = c(4,4.5,1,1))
-ordicomm = ordiplot(comm.ord$lv.median, choices = c(1,2), 
+Plot the ordination. The replicates are colored according to the sample. Note the weird replicates those all pull toward the negative - positive controls on the complete ordination (not yet shown). The ellipses show the 95% CI group centroids of replicates from before 1960 (green), between 1960-1990 (orange), after 1990 (blue). The countours mar the sediment age. 
+```{r}
+par(mar=c(4,5,1,1), mfrow = c(1,2))
+ordicomm = ordiplot(LabLVMOrd$lv.median[order(ExpLab$depth),], 
+                    choices = c(1,2), 
                     type = "none", cex =0.5,
                     display = "sites", xlab = "Community axis 1",
                     ylab = "Community axis 2", cex.lab = 1.5)
+ordihull(ordicomm, ExpLab$nuclear[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("green"),
+            alpha=50, show.groups=(c("before")))
+ordihull(ordicomm, ExpLab$nuclear[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("orange"),
+            alpha=50, show.groups=(c("during")))
+ordihull(ordicomm, ExpLab$nuclear[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("yellow"),
+            alpha=50, show.groups=(c("after")))
+ordiellipse(ordicomm, ExpLab$person[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("brown"),
+            alpha=150,kind="se",conf=0.95, 
+            show.groups=(c("Miki")))
+ordiellipse(ordicomm, ExpLab$person[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("blue"),
+            alpha=150,kind="se",conf=0.95, 
+            show.groups=(c("Orsi")))
+ordispider(ordicomm, ExpLab$depth.nominal, col="grey")
 points(ordicomm, "sites", lwd=2, 
-       col=RepliExpColors$symbols*10, 
-       pch = RepliExpColors$symbols)
-ordispider(ordicomm, RepliExpColors$symbols, 
-           col=sample_colors, lwd = 2)
-ordisurf(ordicomm, RepliExpColors$depth, add=T, col = "darkgrey")
-legend(-1.8, 0.9, sample_legend, border="white", bty="n", lwd = 2,
-col=sample_colors, pch = as.numeric(sample_colors)/10, cex = 0.5)
+       col=MyColors, bg = MyColors, pch = 20 + as.numeric(ExpLab$person[order(ExpLab$depth)]))
+
+# Ordination plot with the kit highlighted
+ordicomm = ordiplot(LabLVMOrd$lv.median[order(ExpLab$depth),], 
+                    choices = c(1,2), 
+                    type = "none", cex =0.5,
+                    display = "sites", xlab = "Community axis 1",
+                    ylab = "Community axis 2", cex.lab = 1.5)
+ordihull(ordicomm, ExpLab$nuclear[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("green"),
+            alpha=50, show.groups=(c("before")))
+ordihull(ordicomm, ExpLab$nuclear[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("orange"),
+            alpha=50, show.groups=(c("during")))
+ordihull(ordicomm, ExpLab$nuclear[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("yellow"),
+            alpha=50, show.groups=(c("after")))
+ordiellipse(ordicomm, ExpLab$kit[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("brown"),
+            alpha=150,kind="se",conf=0.95, 
+            show.groups=(c("MB")))
+ordiellipse(ordicomm, ExpLab$kit[order(ExpLab$depth)],cex=.5, 
+            draw="polygon", col=c("blue"),
+            alpha=150,kind="se",conf=0.95, 
+            show.groups=(c("MN")))
+ordispider(ordicomm, ExpLab$depth.nominal, col="grey")
+points(ordicomm, "sites", lwd=2, 
+       col=MyColors, bg =MyColors, pch = 20+as.numeric(ExpLab$kit[order(ExpLab$depth)]))
 ```
 
-# Randomization in the context of experiments/observation VS DNA extraction, PCR setup and sequencing strategy
-
-On Web of Science 14,023 entries were found on Dec. 14, 2016 with the terms "molecul\* AND ecol\*". We ordered the hits from the newest to the oldest and randomly selected 100 papers to evaluate the mentions of **random\* **.
+### Variance partitioning graph
 ```{r}
-# Generate 100 random numbers between 1 - 17,551
-write.csv(file="random_numbers_literature.csv", sample(1:14023, 100))
-```
+MyVariances = cbind(conc = anova(conc.weight.kit.person.age)[1:4,2],
+                    PCR = anova(read.conc.kit.pers.age)[1:4,2],
+                    hill1 = anova(hill1.read.kit.pers.nucl)[1:4,2],
+                    hill2 = anova(hill2.read.kit.pers.nucl)[1:4,2],
+                    hill3 = anova(hill3.read.kit.pers.nucl)[1:4,2],
+                    comp = OTU.anova$table[2:5,3])
+rownames(MyVariances) = c("weight/conc/reads", "kit", "person", "age/nucl")
 
-There were *XXX* papers that were not suitable for the comparison since they were reviews, or we could not obtain with our available institutional access. We replaced these with a new random set of papers.
+MyVariancePerc = apply(MyVariances, 2, function(x){x/sum(x)})
 
-```{r}
-NotAvailable = c(,)
-Reviews = c(,)
+par(mar = c(2,2,2,1))
+barplot(MyVariancePerc, 
+        legend.text=c("Other factors", "Expected bias", 
+                      "Unexpected bias","Biological signal"), 
+        xlim=c(0, ncol(MyVariancePerc) + 4),
+        args.legend=list(
+          x=ncol(MyVariancePerc) + 5,
+          y=max(colSums(MyVariancePerc)),
+          bty = "n"))
 ```
